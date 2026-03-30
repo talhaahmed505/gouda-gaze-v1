@@ -12,12 +12,25 @@
 
         <div id="video-viewport">
             <iframe
+                id="cam-feed"
                 src="http://{{ pi_ip }}:1984/webrtc.html?src=cam&mode=webrtc"
                 scrolling="no"
                 allowfullscreen>
             </iframe>
         </div>
 
+        <!-- Zoom slider -->
+        <div class="zoom-bar">
+            <span class="zoom-label">1x</span>
+            <input
+                type="range"
+                id="zoom-slider"
+                min="100" max="400" step="10" value="100"
+                aria-label="Zoom">
+            <span class="zoom-label" id="zoom-value">1.0x</span>
+        </div>
+
+        <!-- D-pad -->
         <div class="control-panel">
             <div class="d-pad-grid">
                 <button class="control-btn" style="grid-area: up"    onclick="sendMove('up')">&#9650;</button>
@@ -29,6 +42,17 @@
     </div>
 
     <script>
+        const slider   = document.getElementById('zoom-slider');
+        const feed     = document.getElementById('cam-feed');
+        const zoomLabel = document.getElementById('zoom-value');
+
+        slider.addEventListener('input', () => {
+            const scale = slider.value / 100;
+            feed.style.transform = `scale(${scale})`;
+            feed.style.transformOrigin = 'center center';
+            zoomLabel.textContent = `${scale.toFixed(1)}x`;
+        });
+
         function sendMove(dir) {
             fetch('/api/move/' + dir)
                 .then(res => res.json())
