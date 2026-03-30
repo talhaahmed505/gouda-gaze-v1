@@ -1,0 +1,4 @@
+.env
+test_shot.jpg
+static/hls/
+__pycache__/

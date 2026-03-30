@@ -1,0 +1,7 @@
+api:
+  listen: ":1984"
+  origin: "*"  # This allows your Flask app on port 1122 to 'borrow' the script
+
+streams:
+  # Using MJPEG input is usually the most stable for USB webcams on Pi
+  cam: ffmpeg:device?video=/dev/video0&input_format=mjpeg&video_size=1280x720#video=h264

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GOUDA GAZE</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div id="app-container">
+        <h1>Gouda Gaze</h1>
+
+        <div id="video-viewport">
+            <iframe
+                src="http://{{ pi_ip }}:1984/webrtc.html?src=cam&mode=webrtc"
+                scrolling="no"
+                allowfullscreen>
+            </iframe>
+        </div>
+
+        <div class="control-panel">
+            <div class="d-pad-grid">
+                <button class="control-btn" style="grid-area: up"    onclick="sendMove('up')">&#9650;</button>
+                <button class="control-btn" style="grid-area: left"  onclick="sendMove('left')">&#9664;</button>
+                <button class="control-btn" style="grid-area: right" onclick="sendMove('right')">&#9654;</button>
+                <button class="control-btn" style="grid-area: down"  onclick="sendMove('down')">&#9660;</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function sendMove(dir) {
+            fetch('/api/move/' + dir)
+                .then(res => res.json())
+                .catch(err => console.error("Error:", err));
+        }
+    </script>
+</body>
+</html>

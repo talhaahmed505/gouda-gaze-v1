@@ -1,0 +1,24 @@
+services:
+  # Your Python UI & Control Logic
+  gg:
+    build: .
+    container_name: gouda-gaze
+    restart: unless-stopped
+    volumes:
+      - .:/gouda-gaze
+    ports:
+      - "1122:1122"
+    privileged: true
+    environment:
+      - PI_IP_TS=${PI_IP_TS}
+
+  # The Real-Time Video Engine (WebRTC)
+  streamer:
+    image: alexxit/go2rtc
+    container_name: gouda-streamer
+    network_mode: host # Crucial for WebRTC to negotiate ports
+    privileged: true
+    devices:
+      - "/dev/video0:/dev/video0"
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml
