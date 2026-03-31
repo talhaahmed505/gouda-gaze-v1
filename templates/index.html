@@ -6,7 +6,7 @@
     <title>GOUDA GAZE</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body>
+<body class="{{ 'privacy-active' if privacy else '' }}">
     <div id="app-container">
         <h1>Gouda Gaze</h1>
 
@@ -15,38 +15,47 @@
             <!-- Left: video + zoom -->
             <div id="video-col">
                 <div id="video-viewport">
-                    <iframe
-                        id="cam-feed"
-                        src="http://{{ pi_ip }}:1984/webrtc.html?src=cam&mode=webrtc"
-                        scrolling="no"
-                        allowfullscreen>
-                    </iframe>
+                    {% if privacy %}
+                        <!-- Privacy mode: serve static image from Flask, stream stays on Pi -->
+                        <img id="cam-feed" src="/privacy-image" alt="Privacy Mode">
+                    {% else %}
+                        <!-- Normal mode: live WebRTC stream -->
+                        <iframe
+                            id="cam-feed"
+                            src="http://{{ pi_ip }}:1984/webrtc.html?src=cam&mode=webrtc"
+                            scrolling="no"
+                            allowfullscreen>
+                        </iframe>
+                    {% endif %}
                 </div>
 
-                <div class="zoom-bar">
+                <div class="zoom-bar {{ 'disabled' if privacy else '' }}">
                     <span class="zoom-label">1x</span>
                     <input
                         type="range"
                         id="zoom-slider"
                         min="100" max="400" step="10" value="100"
-                        aria-label="Zoom">
+                        aria-label="Zoom"
+                        {{ 'disabled' if privacy else '' }}>
                     <span class="zoom-label" id="zoom-value">1.0x</span>
                 </div>
             </div>
 
-            <!-- Right: d-pad with home in center -->
+            <!-- Right: d-pad + privacy button -->
             <div class="control-panel">
-                <div class="d-pad-grid">
-                    <button class="control-btn" style="grid-area: up"
-                        data-dir="up">&#9650;</button>
-                    <button class="control-btn" style="grid-area: left"
-                        data-dir="left">&#9664;</button>
-                    <button class="control-btn home-btn" style="grid-area: center"
-                        id="home-btn">&#8962;</button>
-                    <button class="control-btn" style="grid-area: right"
-                        data-dir="right">&#9654;</button>
-                    <button class="control-btn" style="grid-area: down"
-                        data-dir="down">&#9660;</button>
+                <div class="controls-col">
+                    <div class="d-pad-grid">
+                        <button class="control-btn" style="grid-area: up"    data-dir="up"    {{ 'disabled' if privacy else '' }}>&#9650;</button>
+                        <button class="control-btn" style="grid-area: left"  data-dir="left"  {{ 'disabled' if privacy else '' }}>&#9664;</button>
+                        <button class="control-btn home-btn" style="grid-area: center" id="home-btn" {{ 'disabled' if privacy else '' }}>&#8962;</button>
+                        <button class="control-btn" style="grid-area: right" data-dir="right" {{ 'disabled' if privacy else '' }}>&#9654;</button>
+                        <button class="control-btn" style="grid-area: down"  data-dir="down"  {{ 'disabled' if privacy else '' }}>&#9660;</button>
+                    </div>
+
+                    <button class="privacy-btn {{ 'privacy-on' if privacy else '' }}" id="privacy-btn">
+                        <span class="privacy-btn-icon">{% if privacy %}&#128275;{% else %}&#128274;{% endif %}</span>
+                        <span class="privacy-btn-label">{% if privacy %}Resume{% else %}Privacy{% endif %}</span>
+                    </button>
                 </div>
             </div>
 
@@ -54,51 +63,60 @@
     </div>
 
     <script>
-        // ── Zoom ────────────────────────────────────────────
+        // ── Zoom (only active when not in privacy mode) ──────
         const slider    = document.getElementById('zoom-slider');
         const feed      = document.getElementById('cam-feed');
         const zoomLabel = document.getElementById('zoom-value');
 
-        slider.addEventListener('input', () => {
-            const scale = slider.value / 100;
-            feed.style.transform = `scale(${scale})`;
-            zoomLabel.textContent = `${scale.toFixed(1)}x`;
-        });
+        if (slider && !slider.disabled) {
+            slider.addEventListener('input', () => {
+                const scale = slider.value / 100;
+                feed.style.transform = `scale(${scale})`;
+                zoomLabel.textContent = `${scale.toFixed(1)}x`;
+            });
+        }
 
-        // ── PTZ continuous movement ─────────────────────────
+        // ── PTZ continuous movement ──────────────────────────
         function startMove(dir) {
             fetch('/api/move/start/' + dir).catch(err => console.error(err));
         }
-
         function stopMove(dir) {
             fetch('/api/move/stop/' + dir).catch(err => console.error(err));
         }
 
-        // Attach listeners to all directional buttons
-        document.querySelectorAll('.control-btn[data-dir]').forEach(btn => {
+        document.querySelectorAll('.control-btn[data-dir]:not([disabled])').forEach(btn => {
             const dir = btn.dataset.dir;
-
-            // Mouse (desktop)
             btn.addEventListener('mousedown',  () => startMove(dir));
             btn.addEventListener('mouseup',    () => stopMove(dir));
-            btn.addEventListener('mouseleave', () => stopMove(dir)); // safety stop if cursor drifts off
-
-            // Touch (mobile)
+            btn.addEventListener('mouseleave', () => stopMove(dir));
             btn.addEventListener('touchstart', (e) => { e.preventDefault(); startMove(dir); }, { passive: false });
             btn.addEventListener('touchend',   (e) => { e.preventDefault(); stopMove(dir); },   { passive: false });
         });
 
         // ── Home ─────────────────────────────────────────────
-        document.getElementById('home-btn').addEventListener('click', () => {
-            // Reset digital zoom instantly
-            slider.value = 100;
-            feed.style.transform = 'scale(1)';
-            zoomLabel.textContent = '1.0x';
+        const homeBtn = document.getElementById('home-btn');
+        if (homeBtn && !homeBtn.disabled) {
+            homeBtn.addEventListener('click', () => {
+                slider.value = 100;
+                feed.style.transform = 'scale(1)';
+                zoomLabel.textContent = '1.0x';
+                fetch('/api/home').catch(err => console.error(err));
+            });
+        }
 
-            fetch('/api/home')
+        // ── Privacy toggle ───────────────────────────────────
+        document.getElementById('privacy-btn').addEventListener('click', () => {
+            const isOn = document.body.classList.contains('privacy-active');
+            const endpoint = isOn ? '/api/privacy/off' : '/api/privacy/on';
+            fetch(endpoint, { method: 'POST' })
                 .then(res => res.json())
-                .then(data => console.log("Home:", data))
-                .catch(err => console.error("Home error:", err));
+                .then(() => {
+                    // Reload the page so Flask re-renders the correct iframe/img src.
+                    // This is intentional — it guarantees no stream data ever reaches
+                    // the client after privacy is enabled.
+                    window.location.reload();
+                })
+                .catch(err => console.error("Privacy error:", err));
         });
     </script>
 </body>

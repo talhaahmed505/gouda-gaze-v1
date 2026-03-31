@@ -3,6 +3,8 @@
     --accent-color: #D4AA7D;
     --accent-dark: #b8926a;
     --text-on-accent: #1a1a1a;
+    --privacy-color: #c0392b;
+    --privacy-dark: #96281b;
 }
 
 *, *::before, *::after {
@@ -38,7 +40,7 @@ h1 {
     opacity: 0.7;
 }
 
-/* ── Main layout: video left, controls right ───────────── */
+/* ── Main layout ───────────────────────────────────────── */
 
 #main-layout {
     width: 100%;
@@ -50,7 +52,7 @@ h1 {
 
 #video-col {
     flex: 1;
-    min-width: 0;   /* prevents flex children from overflowing */
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -70,7 +72,12 @@ h1 {
     position: relative;
 }
 
-iframe {
+/* Privacy mode: red border to signal locked state */
+.privacy-active #video-viewport {
+    border-color: rgba(192, 57, 43, 0.6);
+}
+
+iframe, #video-viewport img {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -79,6 +86,7 @@ iframe {
     display: block;
     transition: transform 0.15s ease;
     transform-origin: center center;
+    object-fit: cover;
 }
 
 /* ── Zoom bar ──────────────────────────────────────────── */
@@ -88,6 +96,11 @@ iframe {
     display: flex;
     align-items: center;
     gap: 12px;
+}
+
+.zoom-bar.disabled {
+    opacity: 0.3;
+    pointer-events: none;
 }
 
 .zoom-label {
@@ -134,7 +147,7 @@ input[type="range"]:active::-webkit-slider-thumb {
     transform: scale(1.2);
 }
 
-/* ── Controls ──────────────────────────────────────────── */
+/* ── Controls column ───────────────────────────────────── */
 
 .control-panel {
     flex-shrink: 0;
@@ -142,6 +155,15 @@ input[type="range"]:active::-webkit-slider-thumb {
     justify-content: center;
     align-items: center;
 }
+
+.controls-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+}
+
+/* ── D-pad ─────────────────────────────────────────────── */
 
 .d-pad-grid {
     display: grid;
@@ -169,7 +191,7 @@ input[type="range"]:active::-webkit-slider-thumb {
     padding: 0;
     appearance: none;
     -webkit-appearance: none;
-    transition: background-color 0.1s, color 0.1s, transform 0.08s;
+    transition: background-color 0.1s, color 0.1s, transform 0.08s, opacity 0.2s;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
 }
@@ -184,7 +206,12 @@ input[type="range"]:active::-webkit-slider-thumb {
     transform: scale(0.91);
 }
 
-/* Home button — slightly distinct so it reads as a different action */
+.control-btn[disabled] {
+    opacity: 0.25;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .home-btn {
     font-size: 1.3rem;
     border-style: dashed;
@@ -195,7 +222,51 @@ input[type="range"]:active::-webkit-slider-thumb {
     opacity: 1;
 }
 
-/* ── Mobile: stack vertically, video fills width ───────── */
+/* ── Privacy button ────────────────────────────────────── */
+
+.privacy-btn {
+    width: 168px;   /* matches full d-pad width: 3*56 + 2*8 */
+    height: 40px;
+    background-color: transparent;
+    color: var(--accent-color);
+    border: 1.5px solid var(--accent-color);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+
+.privacy-btn:hover {
+    background-color: rgba(212, 170, 125, 0.1);
+}
+
+/* Active (privacy ON) state */
+.privacy-btn.privacy-on {
+    color: var(--privacy-color);
+    border-color: var(--privacy-color);
+}
+
+.privacy-btn.privacy-on:hover {
+    background-color: rgba(192, 57, 43, 0.1);
+}
+
+.privacy-btn:active {
+    transform: scale(0.96);
+}
+
+/* ── Mobile ────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
     body {
@@ -210,7 +281,6 @@ input[type="range"]:active::-webkit-slider-thumb {
         width: 100%;
     }
 
-    /* Remove the desktop height cap — let 16:9 ratio drive the height naturally */
     #video-viewport {
         max-height: none;
         max-width: 100%;
