@@ -195,14 +195,28 @@ input[type="range"]:active::-webkit-slider-thumb {
     opacity: 1;
 }
 
-/* ── Mobile: stack vertically ──────────────────────────── */
+/* ── Mobile: stack vertically, video fills width ───────── */
 
 @media (max-width: 600px) {
+    body {
+        padding: 10px;
+    }
+
     #main-layout {
         flex-direction: column;
     }
 
+    #video-col {
+        width: 100%;
+    }
+
+    /* Remove the desktop height cap — let 16:9 ratio drive the height naturally */
+    #video-viewport {
+        max-height: none;
+        max-width: 100%;
+    }
+
     .control-panel {
-        margin-top: 8px;
+        margin-top: 12px;
     }
 }

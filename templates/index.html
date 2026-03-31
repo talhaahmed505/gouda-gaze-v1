@@ -37,11 +37,16 @@
             <!-- Right: d-pad with home in center -->
             <div class="control-panel">
                 <div class="d-pad-grid">
-                    <button class="control-btn" style="grid-area: up"    onclick="sendMove('up')">&#9650;</button>
-                    <button class="control-btn" style="grid-area: left"  onclick="sendMove('left')">&#9664;</button>
-                    <button class="control-btn home-btn" style="grid-area: center" onclick="sendHome()">&#8962;</button>
-                    <button class="control-btn" style="grid-area: right" onclick="sendMove('right')">&#9654;</button>
-                    <button class="control-btn" style="grid-area: down"  onclick="sendMove('down')">&#9660;</button>
+                    <button class="control-btn" style="grid-area: up"
+                        data-dir="up">&#9650;</button>
+                    <button class="control-btn" style="grid-area: left"
+                        data-dir="left">&#9664;</button>
+                    <button class="control-btn home-btn" style="grid-area: center"
+                        id="home-btn">&#8962;</button>
+                    <button class="control-btn" style="grid-area: right"
+                        data-dir="right">&#9654;</button>
+                    <button class="control-btn" style="grid-area: down"
+                        data-dir="down">&#9660;</button>
                 </div>
             </div>
 
@@ -49,6 +54,7 @@
     </div>
 
     <script>
+        // ── Zoom ────────────────────────────────────────────
         const slider    = document.getElementById('zoom-slider');
         const feed      = document.getElementById('cam-feed');
         const zoomLabel = document.getElementById('zoom-value');
@@ -59,24 +65,41 @@
             zoomLabel.textContent = `${scale.toFixed(1)}x`;
         });
 
-        function sendMove(dir) {
-            fetch('/api/move/' + dir)
-                .then(res => res.json())
-                .catch(err => console.error("Error:", err));
+        // ── PTZ continuous movement ─────────────────────────
+        function startMove(dir) {
+            fetch('/api/move/start/' + dir).catch(err => console.error(err));
         }
 
-        function sendHome() {
-            // Reset digital zoom immediately so UI feels instant
+        function stopMove(dir) {
+            fetch('/api/move/stop/' + dir).catch(err => console.error(err));
+        }
+
+        // Attach listeners to all directional buttons
+        document.querySelectorAll('.control-btn[data-dir]').forEach(btn => {
+            const dir = btn.dataset.dir;
+
+            // Mouse (desktop)
+            btn.addEventListener('mousedown',  () => startMove(dir));
+            btn.addEventListener('mouseup',    () => stopMove(dir));
+            btn.addEventListener('mouseleave', () => stopMove(dir)); // safety stop if cursor drifts off
+
+            // Touch (mobile)
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); startMove(dir); }, { passive: false });
+            btn.addEventListener('touchend',   (e) => { e.preventDefault(); stopMove(dir); },   { passive: false });
+        });
+
+        // ── Home ─────────────────────────────────────────────
+        document.getElementById('home-btn').addEventListener('click', () => {
+            // Reset digital zoom instantly
             slider.value = 100;
             feed.style.transform = 'scale(1)';
             zoomLabel.textContent = '1.0x';
 
-            // Tell the backend to recall the camera's home preset
             fetch('/api/home')
                 .then(res => res.json())
                 .then(data => console.log("Home:", data))
                 .catch(err => console.error("Home error:", err));
-        }
+        });
     </script>
 </body>
 </html>

@@ -1,5 +1,4 @@
 import os
-import time
 import requests
 from requests.auth import HTTPDigestAuth
 from flask import Flask, render_template, jsonify
@@ -7,12 +6,11 @@ from flask import Flask, render_template, jsonify
 app = Flask(__name__)
 
 # --- Amcrest camera config from environment ---
-CAM_IP       = os.environ["CAM_IP"]
-CAM_USER     = os.environ["CAM_USER"]
-CAM_PASS     = os.environ["CAM_PASS"]
-CAM_CHANNEL  = os.environ["CAM_CHANNEL"]
-PTZ_SPEED    = int(os.environ["PTZ_SPEED"])
-PTZ_DURATION = float(os.environ["PTZ_DURATION"])
+CAM_IP      = os.environ["CAM_IP"]
+CAM_USER    = os.environ["CAM_USER"]
+CAM_PASS    = os.environ["CAM_PASS"]
+CAM_CHANNEL = os.environ["CAM_CHANNEL"]
+PTZ_SPEED   = int(os.environ["PTZ_SPEED"])
 
 # Amcrest CGI direction codes
 DIRECTION_MAP = {
@@ -45,7 +43,7 @@ def ptz_command(action: str, code: str) -> bool:
 def ptz_preset(preset_id: int = 1) -> bool:
     """
     Tell the camera to move to a saved preset position.
-    preset_id 1 = home (you set this once in the camera's web UI).
+    preset_id 1 = home (set once in the camera's web UI).
     """
     url = (
         f"http://{CAM_IP}/cgi-bin/ptz.cgi"
@@ -66,24 +64,28 @@ def index():
     return render_template('index.html', pi_ip=pi_ip)
 
 
-@app.route('/api/move/<direction>')
-def move_camera(direction: str):
+@app.route('/api/move/start/<direction>')
+def move_start(direction: str):
     direction = direction.lower()
-
     if direction not in DIRECTION_MAP:
         return jsonify({"status": "error", "message": f"Unknown direction: {direction}"}), 400
-
-    code = DIRECTION_MAP[direction]
-
-    ok = ptz_command("start", code)
+    ok = ptz_command("start", DIRECTION_MAP[direction])
     if not ok:
         return jsonify({"status": "error", "message": "Camera command failed"}), 502
+    print(f"PTZ: start {direction}")
+    return jsonify({"status": "success", "action": "start", "direction": direction})
 
-    time.sleep(PTZ_DURATION)
-    ptz_command("stop", code)
 
-    print(f"PTZ: moved {direction} for {PTZ_DURATION}s")
-    return jsonify({"status": "success", "direction": direction})
+@app.route('/api/move/stop/<direction>')
+def move_stop(direction: str):
+    direction = direction.lower()
+    if direction not in DIRECTION_MAP:
+        return jsonify({"status": "error", "message": f"Unknown direction: {direction}"}), 400
+    ok = ptz_command("stop", DIRECTION_MAP[direction])
+    if not ok:
+        return jsonify({"status": "error", "message": "Camera command failed"}), 502
+    print(f"PTZ: stop {direction}")
+    return jsonify({"status": "success", "action": "stop", "direction": direction})
 
 
 @app.route('/api/home')
