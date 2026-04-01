@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     volumes:
       - .:/gouda-gaze
+      - ./logs:/gouda-gaze/logs  # Persist logs on host
     network_mode: host
     environment:
       - PI_IP_TS=${PI_IP_TS}
@@ -16,7 +17,7 @@ services:
       - PTZ_SPEED=${PTZ_SPEED}
       - PTZ_DURATION=${PTZ_DURATION}
 
-    # Real-Time Video Engine (WebRTC)
+  # Real-Time Video Engine (WebRTC)
   streamer:
     image: alexxit/go2rtc
     container_name: gouda-streamer
@@ -28,4 +29,3 @@ services:
       - CAM_PASS=${CAM_PASS}
     volumes:
       - ./go2rtc.yaml:/config/go2rtc.yaml
-    # No `devices` or `privileged` needed - camera is on the network, not USB
