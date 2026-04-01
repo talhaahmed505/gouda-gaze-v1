@@ -21,5 +21,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 3. Copy the rest of your project code
 COPY . .
 
+# Create logs directory
+RUN mkdir -p logs
+
 # Run the app
 CMD ["python", "app.py"]
