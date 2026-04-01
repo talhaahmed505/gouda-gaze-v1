@@ -3,10 +3,16 @@ from __future__ import annotations
 import os
 import hashlib
 import threading
+import time
 import requests
 from requests.auth import HTTPDigestAuth
 from flask import Flask, render_template, jsonify, send_file, request
 from logger_config import get_loggers
+from flask import Flask, render_template, jsonify, send_file, request, g
+from logger_config import get_loggers
+
+# Initialize loggers
+app_logger, http_logger, ptz_logger, privacy_logger = get_loggers()
 
 app = Flask(__name__)
 app_log, http_log, ptz_log, privacy_log = get_loggers()
@@ -36,6 +42,15 @@ DIRECTION_MAP = {
     "left":  "Left",
     "right": "Right",
 }
+
+# Startup logging
+app_logger.info("=" * 80)
+app_logger.info("GOUDA GAZE APPLICATION STARTUP")
+app_logger.info("=" * 80)
+app_logger.info(f"Camera IP: {CAM_IP}")
+app_logger.info(f"Camera Channel: {CAM_CHANNEL}")
+app_logger.info(f"PTZ Speed: {PTZ_SPEED}")
+app_logger.info("=" * 80)
 
 # Valid stream setting values — used for server-side validation
 VALID_RESOLUTIONS    = ["2560x1440", "1920x1080", "1280x720", "640x480"]
@@ -281,6 +296,48 @@ def ptz_command(action: str, code: str) -> bool:
         return ok
     except requests.RequestException as e:
         ptz_log.error(f"PTZ error ({action} {code}): {e}")
+        resp = requests.get(
+            url,
+            auth=HTTPDigestAuth(CAM_USER, CAM_PASS),
+            timeout=3
+        )
+        duration_ms = (time.time() - start_time) * 1000
+        
+        if resp.status_code == 200:
+            ptz_logger.info(
+                f"SUCCESS | action={action} | code={code} | "
+                f"duration_ms={duration_ms:.0f} | status={resp.status_code}"
+            )
+            return True
+        else:
+            ptz_logger.warning(
+                f"FAILED | action={action} | code={code} | "
+                f"status={resp.status_code} | duration_ms={duration_ms:.0f}"
+            )
+            return False
+            
+    except requests.Timeout:
+        duration_ms = (time.time() - start_time) * 1000
+        ptz_logger.error(
+            f"TIMEOUT | action={action} | code={code} | "
+            f"duration_ms={duration_ms:.0f}"
+        )
+        return False
+        
+    except requests.ConnectionError as e:
+        duration_ms = (time.time() - start_time) * 1000
+        ptz_logger.error(
+            f"CONNECTION_ERROR | action={action} | code={code} | "
+            f"error={str(e)[:100]} | duration_ms={duration_ms:.0f}"
+        )
+        return False
+        
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        ptz_logger.error(
+            f"EXCEPTION | action={action} | code={code} | "
+            f"error={type(e).__name__}: {str(e)[:100]} | duration_ms={duration_ms:.0f}"
+        )
         return False
 
 
@@ -297,6 +354,32 @@ def ptz_preset(preset_id: int = 1) -> bool:
         return ok
     except requests.RequestException as e:
         ptz_log.error(f"PTZ preset error: {e}")
+        resp = requests.get(
+            url,
+            auth=HTTPDigestAuth(CAM_USER, CAM_PASS),
+            timeout=3
+        )
+        duration_ms = (time.time() - start_time) * 1000
+        
+        if resp.status_code == 200:
+            ptz_logger.info(
+                f"PRESET_SUCCESS | preset_id={preset_id} | "
+                f"duration_ms={duration_ms:.0f} | status={resp.status_code}"
+            )
+            return True
+        else:
+            ptz_logger.warning(
+                f"PRESET_FAILED | preset_id={preset_id} | "
+                f"status={resp.status_code} | duration_ms={duration_ms:.0f}"
+            )
+            return False
+            
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        ptz_logger.error(
+            f"PRESET_ERROR | preset_id={preset_id} | "
+            f"error={type(e).__name__}: {str(e)[:100]} | duration_ms={duration_ms:.0f}"
+        )
         return False
 
 
@@ -312,6 +395,7 @@ def index():
 
 @app.route('/privacy-image')
 def privacy_image():
+    app_logger.debug("Serving privacy image")
     return send_file('./privacy.png', mimetype='image/png')
 
 
@@ -330,6 +414,9 @@ def privacy_on():
             return jsonify({"status": "error", "message": "Camera privacy command failed"}), 502
         _privacy_enabled = True
     privacy_log.info("Privacy mode: ON")
+    _privacy_enabled = True
+    privacy_logger.info("ENABLED | Privacy mode turned ON")
+    app_logger.info("Privacy mode enabled")
     return jsonify({"status": "success", "privacy": True})
 
 
@@ -343,6 +430,9 @@ def privacy_off():
             return jsonify({"status": "error", "message": "Camera privacy command failed"}), 502
         _privacy_enabled = False
     privacy_log.info("Privacy mode: OFF")
+    _privacy_enabled = False
+    privacy_logger.info("DISABLED | Privacy mode turned OFF")
+    app_logger.info("Privacy mode disabled")
     return jsonify({"status": "success", "privacy": False})
 
 
@@ -392,6 +482,7 @@ def move_start(direction: str):
     ok = ptz_command("start", DIRECTION_MAP[direction])
     if not ok:
         return jsonify({"status": "error", "message": "Camera command failed"}), 502
+    
     return jsonify({"status": "success", "action": "start", "direction": direction})
 
 
@@ -405,6 +496,7 @@ def move_stop(direction: str):
     ok = ptz_command("stop", DIRECTION_MAP[direction])
     if not ok:
         return jsonify({"status": "error", "message": "Camera command failed"}), 502
+    
     return jsonify({"status": "success", "action": "stop", "direction": direction})
 
 
@@ -416,9 +508,17 @@ def home_camera():
     if not ok:
         return jsonify({"status": "error", "message": "Home preset failed"}), 502
     ptz_log.info("Homed to preset 1")
+    
     return jsonify({"status": "success", "action": "home"})
 
 
 if __name__ == "__main__":
     app_log.info("Gouda Gaze starting")
     app.run(host='0.0.0.0', port=1122, debug=False)
+    try:
+        app_logger.info("Starting Flask server on 0.0.0.0:1122")
+        app.run(host='0.0.0.0', port=1122, debug=False)
+    except KeyboardInterrupt:
+        app_logger.info("Shutdown signal received - exiting gracefully")
+    except Exception as e:
+        app_logger.critical(f"Fatal error: {e}", exc_info=True)
