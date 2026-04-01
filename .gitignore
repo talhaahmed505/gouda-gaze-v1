@@ -2,3 +2,5 @@
 test_shot.jpg
 static/hls/
 __pycache__/
+camera-info.txt
+logs/*
