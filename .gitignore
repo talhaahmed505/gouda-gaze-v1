@@ -1,9 +1,5 @@
 .env
-test_shot.jpg
 static/hls/
 __pycache__/
-<<<<<<< HEAD
-camera-info.txt
-=======
->>>>>>> ced84a6 (updated git ignore to drop log files)
 logs/*
+snapshots/*
