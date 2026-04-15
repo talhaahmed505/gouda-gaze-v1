@@ -72,7 +72,6 @@ h1 {
     position: relative;
 }
 
-/* Privacy mode: red border to signal locked state */
 .privacy-active #video-viewport {
     border-color: rgba(192, 57, 43, 0.6);
 }
@@ -225,7 +224,7 @@ input[type="range"]:active::-webkit-slider-thumb {
 /* ── Privacy button ────────────────────────────────────── */
 
 .privacy-btn {
-    width: 168px;   /* matches full d-pad width: 3*56 + 2*8 */
+    width: 168px;
     height: 40px;
     background-color: transparent;
     color: var(--accent-color);
@@ -252,7 +251,6 @@ input[type="range"]:active::-webkit-slider-thumb {
     background-color: rgba(212, 170, 125, 0.1);
 }
 
-/* Active (privacy ON) state */
 .privacy-btn.privacy-on {
     color: var(--privacy-color);
     border-color: var(--privacy-color);
@@ -264,6 +262,178 @@ input[type="range"]:active::-webkit-slider-thumb {
 
 .privacy-btn:active {
     transform: scale(0.96);
+}
+
+/* ── Stream settings panel ─────────────────────────────── */
+
+#settings-panel {
+    width: 100%;
+    margin-top: 24px;
+    border: 1px solid rgba(212, 170, 125, 0.2);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.settings-toggle-btn {
+    width: 100%;
+    padding: 10px 16px;
+    background: transparent;
+    color: var(--accent-color);
+    border: none;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0.7;
+    transition: opacity 0.1s, background-color 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+
+.settings-toggle-btn:hover {
+    opacity: 1;
+    background-color: rgba(212, 170, 125, 0.05);
+}
+
+.settings-chevron {
+    margin-left: auto;
+    font-size: 0.65rem;
+    transition: transform 0.2s ease;
+}
+
+.settings-content {
+    padding: 16px;
+    border-top: 1px solid rgba(212, 170, 125, 0.15);
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settings-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.55;
+    user-select: none;
+}
+
+.settings-select,
+.settings-input {
+    background: transparent;
+    color: var(--accent-color);
+    border: 1.5px solid rgba(212, 170, 125, 0.35);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    cursor: pointer;
+    transition: border-color 0.1s;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.settings-select:focus,
+.settings-input:focus {
+    border-color: var(--accent-color);
+}
+
+/* Style the select dropdown arrow */
+.settings-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23D4AA7D'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+}
+
+/* Remove default number input arrows */
+.settings-input::-webkit-inner-spin-button,
+.settings-input::-webkit-outer-spin-button {
+    opacity: 0.4;
+}
+
+.settings-radio-group {
+    display: flex;
+    gap: 16px;
+    padding-top: 4px;
+}
+
+.settings-radio {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.settings-radio input[type="radio"] {
+    accent-color: var(--accent-color);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+.settings-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.settings-status {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    min-height: 1em;
+}
+
+.settings-status-ok    { color: #7dba8a; opacity: 1; }
+.settings-status-error { color: var(--privacy-color); opacity: 1; }
+
+.settings-save-btn {
+    height: 32px;
+    padding: 0 20px;
+    background: transparent;
+    color: var(--accent-color);
+    border: 1.5px solid var(--accent-color);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background-color 0.1s, color 0.1s;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.settings-save-btn:hover {
+    background-color: rgba(212, 170, 125, 0.15);
+}
+
+.settings-save-btn:active {
+    background-color: var(--accent-color);
+    color: var(--text-on-accent);
+}
+
+.settings-save-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
 }
 
 /* ── Mobile ────────────────────────────────────────────── */
@@ -288,5 +458,9 @@ input[type="range"]:active::-webkit-slider-thumb {
 
     .control-panel {
         margin-top: 12px;
+    }
+
+    .settings-grid {
+        grid-template-columns: 1fr 1fr;
     }
 }

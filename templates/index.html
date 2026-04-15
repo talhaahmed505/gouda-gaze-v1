@@ -16,10 +16,8 @@
             <div id="video-col">
                 <div id="video-viewport">
                     {% if privacy %}
-                        <!-- Privacy mode: serve static image from Flask, stream stays on Pi -->
                         <img id="cam-feed" src="/privacy-image" alt="Privacy Mode">
                     {% else %}
-                        <!-- Normal mode: live WebRTC stream -->
                         <iframe
                             id="cam-feed"
                             src="http://{{ pi_ip }}:1984/webrtc.html?src=cam&mode=webrtc"
@@ -60,10 +58,71 @@
             </div>
 
         </div>
+
+        <!-- Stream settings panel -->
+        <div id="settings-panel">
+            <button id="settings-toggle" class="settings-toggle-btn" aria-expanded="false">
+                <span>&#9881;</span> Stream Settings
+                <span class="settings-chevron">&#9660;</span>
+            </button>
+
+            <div id="settings-content" class="settings-content" hidden>
+                <div class="settings-grid">
+
+                    <div class="settings-field">
+                        <label class="settings-label" for="set-resolution">Resolution</label>
+                        <select id="set-resolution" class="settings-select">
+                            <option value="2560x1440">2560×1440 (4MP)</option>
+                            <option value="1920x1080">1920×1080 (1080p)</option>
+                            <option value="1280x720">1280×720 (720p)</option>
+                            <option value="640x480">640×480 (VGA)</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-field">
+                        <label class="settings-label" for="set-fps">Frame Rate</label>
+                        <select id="set-fps" class="settings-select">
+                            <option value="5">5 fps</option>
+                            <option value="10">10 fps</option>
+                            <option value="15">15 fps</option>
+                            <option value="20">20 fps</option>
+                            <option value="25">25 fps</option>
+                            <option value="30">30 fps</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-field">
+                        <label class="settings-label" for="set-bitrate">Bitrate</label>
+                        <select id="set-bitrate" class="settings-select">
+                            <!-- Populated dynamically based on resolution + fps -->
+                        </select>
+                    </div>
+
+                    <div class="settings-field">
+                        <label class="settings-label">Bitrate Mode</label>
+                        <div class="settings-radio-group">
+                            <label class="settings-radio">
+                                <input type="radio" name="bitrate-ctrl" value="VBR"> VBR
+                            </label>
+                            <label class="settings-radio">
+                                <input type="radio" name="bitrate-ctrl" value="CBR"> CBR
+                            </label>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="settings-footer">
+                    <span id="settings-status" class="settings-status"></span>
+                    <button id="settings-save" class="settings-save-btn">Save</button>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        // ── Zoom (only active when not in privacy mode) ──────
+        // ── Zoom ─────────────────────────────────────────────
         const slider    = document.getElementById('zoom-slider');
         const feed      = document.getElementById('cam-feed');
         const zoomLabel = document.getElementById('zoom-value');
@@ -76,13 +135,9 @@
             });
         }
 
-        // ── PTZ continuous movement ──────────────────────────
-        function startMove(dir) {
-            fetch('/api/move/start/' + dir).catch(err => console.error(err));
-        }
-        function stopMove(dir) {
-            fetch('/api/move/stop/' + dir).catch(err => console.error(err));
-        }
+        // ── PTZ ──────────────────────────────────────────────
+        function startMove(dir) { fetch('/api/move/start/' + dir).catch(console.error); }
+        function stopMove(dir)  { fetch('/api/move/stop/'  + dir).catch(console.error); }
 
         document.querySelectorAll('.control-btn[data-dir]:not([disabled])').forEach(btn => {
             const dir = btn.dataset.dir;
@@ -90,7 +145,7 @@
             btn.addEventListener('mouseup',    () => stopMove(dir));
             btn.addEventListener('mouseleave', () => stopMove(dir));
             btn.addEventListener('touchstart', (e) => { e.preventDefault(); startMove(dir); }, { passive: false });
-            btn.addEventListener('touchend',   (e) => { e.preventDefault(); stopMove(dir); },   { passive: false });
+            btn.addEventListener('touchend',   (e) => { e.preventDefault(); stopMove(dir);  }, { passive: false });
         });
 
         // ── Home ─────────────────────────────────────────────
@@ -100,23 +155,175 @@
                 slider.value = 100;
                 feed.style.transform = 'scale(1)';
                 zoomLabel.textContent = '1.0x';
-                fetch('/api/home').catch(err => console.error(err));
+                fetch('/api/home').catch(console.error);
             });
         }
 
         // ── Privacy toggle ───────────────────────────────────
         document.getElementById('privacy-btn').addEventListener('click', () => {
-            const isOn = document.body.classList.contains('privacy-active');
+            const isOn     = document.body.classList.contains('privacy-active');
             const endpoint = isOn ? '/api/privacy/off' : '/api/privacy/on';
             fetch(endpoint, { method: 'POST' })
-                .then(res => res.json())
-                .then(() => {
-                    // Reload the page so Flask re-renders the correct iframe/img src.
-                    // This is intentional — it guarantees no stream data ever reaches
-                    // the client after privacy is enabled.
-                    window.location.reload();
-                })
+                .then(r => r.json())
+                .then(() => window.location.reload())
                 .catch(err => console.error("Privacy error:", err));
+        });
+
+        // ── Stream settings ───────────────────────────────────
+
+        // Pre-calculated bitrate options keyed by resolution then fps.
+        // Formula: snap(w * h * fps / divisor / 1000) to nearest 128 Kbps,
+        // clamped 512–8192. Tiers: Low=÷200, Medium=÷80, High=÷35.
+        // Duplicate values are collapsed so only distinct options appear.
+        // Bitrate options match the camera's own UI dropdowns exactly.
+        // Pattern: 256-step from range_min up to 2048, then 2048-steps to 8192.
+        // range_min is derived proportionally from known reference ranges:
+        //   2560x1440@30=3072, 1920x1080@15=1024, 1920x1080@30=2048
+        const BITRATE_TABLE = {
+            "2560x1440": {
+                "5":  [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "10": [1024,1280,1536,1792,2048,4096,6144,8192],
+                "15": [1792,2048,4096,6144,8192],
+                "20": [4096,6144,8192],
+                "25": [4096,6144,8192],
+                "30": [4096,6144,8192]
+            },
+            "1920x1080": {
+                "5":  [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "10": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "15": [1024,1280,1536,1792,2048,4096,6144,8192],
+                "20": [1280,1536,1792,2048,4096,6144,8192],
+                "25": [1536,1792,2048,4096,6144,8192],
+                "30": [2048,4096,6144,8192]
+            },
+            "1280x720": {
+                "5":  [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "10": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "15": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "20": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "25": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "30": [768,1024,1280,1536,1792,2048,4096,6144,8192]
+            },
+            "640x480": {
+                "5":  [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "10": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "15": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "20": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "25": [512,768,1024,1280,1536,1792,2048,4096,6144,8192],
+                "30": [512,768,1024,1280,1536,1792,2048,4096,6144,8192]
+            }
+        };
+
+        const resEl      = document.getElementById('set-resolution');
+        const fpsEl      = document.getElementById('set-fps');
+        const bitrateEl  = document.getElementById('set-bitrate');
+        const statusEl   = document.getElementById('settings-status');
+        let settingsLoaded = false;
+        let currentBitrate = null; // the camera's actual current bitrate value
+
+        function updateBitrateOptions(preserveValue) {
+            const res  = resEl.value;
+            const fps  = fpsEl.value;
+            const vals = BITRATE_TABLE[res]?.[fps] ?? [512];
+
+            bitrateEl.innerHTML = '';
+            vals.forEach(v => {
+                const el = document.createElement('option');
+                el.value       = v;
+                el.textContent = `${v} Kbps`;
+                bitrateEl.appendChild(el);
+            });
+
+            if (preserveValue !== undefined) {
+                // Select the option closest to preserveValue
+                const closest = vals.reduce((a, b) =>
+                    Math.abs(b - preserveValue) < Math.abs(a - preserveValue) ? b : a
+                );
+                bitrateEl.value = closest;
+            }
+        }
+
+        // Rebuild bitrate options whenever resolution or fps changes
+        resEl.addEventListener('change', () => updateBitrateOptions());
+        fpsEl.addEventListener('change', () => updateBitrateOptions());
+
+        // Initial population (no camera data yet — just fill the dropdown)
+        updateBitrateOptions();
+
+        function setStatus(msg, isError = false) {
+            statusEl.textContent = msg;
+            statusEl.className   = 'settings-status' + (isError ? ' settings-status-error' : ' settings-status-ok');
+            if (msg) setTimeout(() => {
+                statusEl.textContent = '';
+                statusEl.className   = 'settings-status';
+            }, 3000);
+        }
+
+        function loadSettings() {
+            statusEl.textContent = 'Loading…';
+            statusEl.className   = 'settings-status';
+            fetch('/api/stream/settings')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status !== 'success') { setStatus('Failed to load', true); return; }
+                    const s = data.settings;
+
+                    resEl.value = s.resolution;
+                    fpsEl.value = String(s.fps);
+                    document.querySelector(`input[name="bitrate-ctrl"][value="${s.bitrate_ctrl}"]`).checked = true;
+
+                    // Rebuild bitrate dropdown for this resolution+fps, selecting closest to current
+                    currentBitrate = s.bitrate;
+                    updateBitrateOptions(s.bitrate);
+
+                    statusEl.textContent = '';
+                    settingsLoaded = true;
+                })
+                .catch(() => setStatus('Could not reach camera', true));
+        }
+
+        // Panel toggle
+        const toggleBtn      = document.getElementById('settings-toggle');
+        const settingsContent = document.getElementById('settings-content');
+        const chevron        = toggleBtn.querySelector('.settings-chevron');
+
+        toggleBtn.addEventListener('click', () => {
+            const isOpen = !settingsContent.hidden;
+            settingsContent.hidden = isOpen;
+            toggleBtn.setAttribute('aria-expanded', String(!isOpen));
+            chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+            if (!isOpen && !settingsLoaded) loadSettings();
+        });
+
+        // Save
+        document.getElementById('settings-save').addEventListener('click', () => {
+            const resolution  = resEl.value;
+            const fps         = parseInt(fpsEl.value);
+            const bitrate     = parseInt(bitrateEl.value);
+            const bitrateCtrl = document.querySelector('input[name="bitrate-ctrl"]:checked')?.value;
+
+            if (!bitrateCtrl) { setStatus('Select a bitrate mode', true); return; }
+
+            const saveBtn = document.getElementById('settings-save');
+            saveBtn.disabled = true;
+            setStatus('Saving…');
+
+            fetch('/api/stream/settings', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ resolution, fps, bitrate, bitrate_ctrl: bitrateCtrl })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    setStatus('Saved');
+                    currentBitrate = bitrate;
+                } else {
+                    setStatus(data.message || 'Save failed', true);
+                }
+            })
+            .catch(() => setStatus('Network error', true))
+            .finally(() => { saveBtn.disabled = false; });
         });
     </script>
 </body>
