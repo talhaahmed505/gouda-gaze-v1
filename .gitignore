@@ -2,5 +2,8 @@
 static/hls/
 __pycache__/
 logs/*
+<<<<<<< HEAD
 logs/*
+=======
+>>>>>>> 5607fd3 (Gouda Gaze v0.1.1)
 snapshots/*
