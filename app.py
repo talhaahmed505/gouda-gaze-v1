@@ -1,10 +1,11 @@
 from __future__ import annotations
+
 import os
 import hashlib
 import threading
 import requests
 from requests.auth import HTTPDigestAuth
-from flask import Flask, render_template, jsonify, send_file
+from flask import Flask, render_template, jsonify, send_file, request
 from logger_config import get_loggers
 
 app = Flask(__name__)
@@ -36,13 +37,18 @@ DIRECTION_MAP = {
     "right": "Right",
 }
 
+# Valid stream setting values — used for server-side validation
+VALID_RESOLUTIONS    = ["2560x1440", "1920x1080", "1280x720", "640x480"]
+VALID_FPS            = [5, 10, 15, 20, 25, 30]
+VALID_BITRATE_CTRL   = ["CBR", "VBR"]
+BITRATE_RANGE        = (512, 8192)  # Kbps
+
 
 # ── RPC2 auth ─────────────────────────────────────────────
 #
 # Formula confirmed by intercepting faultylabs.MD5 calls in browser console:
 #   step1 = MD5(username + ":" + realm + ":" + password)
 #   step2 = MD5(username + ":" + random + ":" + step1)
-# Both steps use uppercase hex output.
 
 def _MD5(s: str) -> str:
     return hashlib.md5(s.encode()).hexdigest().upper()
@@ -54,9 +60,7 @@ def _rpc2_hash(realm: str, random: str) -> str:
 
 
 def _rpc2_login() -> str | None:
-    """Two-step RPC2 challenge/response. Returns session token or None."""
     try:
-        # Step 1: get challenge
         r1 = requests.post(RPC2_LOGIN_URL, json={
             "method": "global.login",
             "params": {"userName": CAM_USER, "password": "", "clientType": "Web3.0", "loginType": "Direct"},
@@ -73,8 +77,6 @@ def _rpc2_login() -> str | None:
         if not all([realm, random, session]):
             app_log.error(f"RPC2 login step1 missing fields: {d1}")
             return None
-
-        # Step 2: authenticate
         r2 = requests.post(RPC2_LOGIN_URL, json={
             "method": "global.login",
             "params": {
@@ -94,17 +96,14 @@ def _rpc2_login() -> str | None:
         if not d2.get("result"):
             app_log.error(f"RPC2 login step2 rejected: {d2}")
             return None
-
         app_log.info("RPC2 session acquired")
         return d2.get("session")
-
     except requests.RequestException as e:
         app_log.error(f"RPC2 login error: {e}")
         return None
 
 
 def _get_rpc2_session() -> str | None:
-    """Return cached session, re-logging in if stale."""
     global _rpc2_session
     with _rpc2_session_lock:
         if _rpc2_session is None:
@@ -119,7 +118,6 @@ def _invalidate_rpc2_session():
 
 
 def _rpc2_call(method: str, params: dict) -> dict | None:
-    """Authenticated RPC2 call with one automatic session retry."""
     for attempt in range(2):
         session = _get_rpc2_session()
         if not session:
@@ -134,7 +132,6 @@ def _rpc2_call(method: str, params: dict) -> dict | None:
             if not resp.text.strip():
                 return None
             data = resp.json()
-            # Session expired — invalidate and retry
             if not data.get("result") and data.get("error", {}).get("code") in (268632079, 287637505):
                 app_log.debug("RPC2 session expired, re-authenticating")
                 _invalidate_rpc2_session()
@@ -170,7 +167,6 @@ def _hw_set_privacy(enable: bool) -> bool:
     except (KeyError, TypeError):
         privacy_log.error(f"LeLensMask unexpected structure: {get_data}")
         return False
-
     table[0]["Enable"] = enable
     set_data = _rpc2_call("configManager.setConfig", {
         "name": "LeLensMask",
@@ -193,8 +189,76 @@ def _sync_privacy_from_camera():
     privacy_log.info(f"Privacy sync: {'ON' if hw_state else 'OFF'}")
 
 
-# Sync on startup
 _sync_privacy_from_camera()
+
+
+# ── Stream settings (CGI) ─────────────────────────────────
+
+def _parse_encode_response(text: str) -> dict:
+    """
+    Parse the key=value response from configManager getConfig Encode
+    into a flat dict of just the MainFormat[0].Video fields.
+    """
+    result = {}
+    prefix = "table.Encode[0].MainFormat[0].Video."
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            key, _, val = line[len(prefix):].partition("=")
+            result[key.strip()] = val.strip()
+    return result
+
+
+def get_stream_settings() -> dict | None:
+    """Fetch current main stream encode settings from the camera."""
+    url = f"http://{CAM_IP}/cgi-bin/configManager.cgi?action=getConfig&name=Encode"
+    try:
+        resp = requests.get(url, auth=HTTPDigestAuth(CAM_USER, CAM_PASS), timeout=5)
+        if resp.status_code != 200:
+            app_log.error(f"getConfig Encode failed: {resp.status_code}")
+            return None
+        parsed = _parse_encode_response(resp.text)
+        return {
+            "resolution":     parsed.get("resolution", ""),
+            "fps":            int(parsed.get("FPS", 15)),
+            "bitrate":        int(parsed.get("BitRate", 2048)),
+            "bitrate_ctrl":   parsed.get("BitRateControl", "VBR"),
+        }
+    except (requests.RequestException, ValueError) as e:
+        app_log.error(f"get_stream_settings error: {e}")
+        return None
+
+
+def set_stream_settings(resolution: str, fps: int, bitrate: int, bitrate_ctrl: str) -> bool:
+    """
+    Push updated main stream encode settings to the camera.
+    Also updates Width/Height to match the resolution string.
+    """
+    try:
+        w, h = resolution.split("x")
+    except ValueError:
+        app_log.error(f"Invalid resolution format: {resolution}")
+        return False
+
+    params = (
+        f"Encode[0].MainFormat[0].Video.resolution={resolution}"
+        f"&Encode[0].MainFormat[0].Video.Width={w}"
+        f"&Encode[0].MainFormat[0].Video.Height={h}"
+        f"&Encode[0].MainFormat[0].Video.FPS={fps}"
+        f"&Encode[0].MainFormat[0].Video.BitRate={bitrate}"
+        f"&Encode[0].MainFormat[0].Video.BitRateControl={bitrate_ctrl}"
+    )
+    url = f"http://{CAM_IP}/cgi-bin/configManager.cgi?action=setConfig&{params}"
+    try:
+        resp = requests.get(url, auth=HTTPDigestAuth(CAM_USER, CAM_PASS), timeout=5)
+        ok = resp.status_code == 200 and "OK" in resp.text
+        if ok:
+            app_log.info(f"Stream settings updated: {resolution} {fps}fps {bitrate}Kbps {bitrate_ctrl}")
+        else:
+            app_log.error(f"setConfig Encode failed: {resp.status_code} {resp.text}")
+        return ok
+    except requests.RequestException as e:
+        app_log.error(f"set_stream_settings error: {e}")
+        return False
 
 
 # ── CGI helpers ───────────────────────────────────────────
@@ -280,6 +344,42 @@ def privacy_off():
         _privacy_enabled = False
     privacy_log.info("Privacy mode: OFF")
     return jsonify({"status": "success", "privacy": False})
+
+
+@app.route('/api/stream/settings', methods=['GET'])
+def stream_settings_get():
+    settings = get_stream_settings()
+    if settings is None:
+        return jsonify({"status": "error", "message": "Could not read stream settings"}), 502
+    return jsonify({"status": "success", "settings": settings})
+
+
+@app.route('/api/stream/settings', methods=['POST'])
+def stream_settings_set():
+    data = request.get_json()
+    if not data:
+        return jsonify({"status": "error", "message": "No data provided"}), 400
+
+    resolution   = data.get("resolution", "")
+    fps          = data.get("fps")
+    bitrate      = data.get("bitrate")
+    bitrate_ctrl = data.get("bitrate_ctrl", "VBR")
+
+    # Validate
+    if resolution not in VALID_RESOLUTIONS:
+        return jsonify({"status": "error", "message": f"Invalid resolution: {resolution}"}), 400
+    if fps not in VALID_FPS:
+        return jsonify({"status": "error", "message": f"Invalid FPS: {fps}"}), 400
+    if not isinstance(bitrate, int) or not (BITRATE_RANGE[0] <= bitrate <= BITRATE_RANGE[1]):
+        return jsonify({"status": "error", "message": f"Bitrate must be {BITRATE_RANGE[0]}–{BITRATE_RANGE[1]} Kbps"}), 400
+    if bitrate_ctrl not in VALID_BITRATE_CTRL:
+        return jsonify({"status": "error", "message": f"Invalid bitrate control: {bitrate_ctrl}"}), 400
+
+    ok = set_stream_settings(resolution, fps, bitrate, bitrate_ctrl)
+    if not ok:
+        return jsonify({"status": "error", "message": "Failed to apply stream settings"}), 502
+
+    return jsonify({"status": "success", "message": "Stream settings saved"})
 
 
 @app.route('/api/move/start/<direction>')
