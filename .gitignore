@@ -3,3 +3,4 @@ static/hls/
 __pycache__/
 logs/*
 snapshots/*
+docs/
