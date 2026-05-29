@@ -4,3 +4,5 @@ __pycache__/
 logs/*
 snapshots/*
 docs/
+*db
+instance/gouda-gaze.db
