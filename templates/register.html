@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOUDA GAZE — Request Access</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="auth-page">
+    <div id="app-container">
+        <div id="top-bar">
+            <h1>Gouda Gaze</h1>
+        </div>
+
+        <div class="auth-card">
+            <p class="auth-heading">Request Access</p>
+            <p class="auth-subheading">An admin will review your request before you can log in.</p>
+
+            {% if error %}
+            <p class="auth-error" id="server-error">{{ error }}</p>
+            {% endif %}
+
+            <form class="auth-form" method="POST" action="/register" novalidate>
+
+                <div class="auth-field">
+                    <label class="auth-label" for="name">Name</label>
+                    <input
+                        class="auth-input"
+                        type="text"
+                        id="name"
+                        name="name"
+                        autocomplete="name"
+                        autofocus
+                        required>
+                </div>
+
+                <div class="auth-field">
+                    <label class="auth-label" for="email">Email</label>
+                    <input
+                        class="auth-input"
+                        type="email"
+                        id="email"
+                        name="email"
+                        autocomplete="email"
+                        required>
+                </div>
+
+                <!-- Password requirements — always visible -->
+                <div class="pw-rules pw-rules-visible" id="pw-rules" aria-live="polite">
+                    <span class="pw-rule" id="rule-length">&#10007; At least 8 characters</span>
+                    <span class="pw-rule" id="rule-upper">&#10007; One uppercase letter</span>
+                    <span class="pw-rule" id="rule-number">&#10007; One number</span>
+                </div>
+
+                <div class="auth-field">
+                    <label class="auth-label" for="password">Password</label>
+                    <input
+                        class="auth-input"
+                        type="password"
+                        id="password"
+                        name="password"
+                        autocomplete="new-password"
+                        required>
+                </div>
+
+                <div class="auth-field">
+                    <label class="auth-label" for="confirm">Confirm Password</label>
+                    <input
+                        class="auth-input"
+                        type="password"
+                        id="confirm"
+                        name="confirm"
+                        autocomplete="new-password"
+                        required>
+                    <span class="pw-match-msg" id="match-msg" aria-live="polite"></span>
+                </div>
+
+                <button class="auth-btn" type="submit" id="submit-btn">Request Access</button>
+            </form>
+
+            <p class="auth-footer">
+                Already have access? <a href="/login">Log in</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const pwInput  = document.getElementById('password');
+        const cfmInput = document.getElementById('confirm');
+        const matchMsg = document.getElementById('match-msg');
+
+        const ruleLength = document.getElementById('rule-length');
+        const ruleUpper  = document.getElementById('rule-upper');
+        const ruleNumber = document.getElementById('rule-number');
+
+        const TICK  = '\u2713';
+        const CROSS = '\u2717';
+
+        function checkRules(pw) {
+            return {
+                length: pw.length >= 8,
+                upper:  /[A-Z]/.test(pw),
+                number: /[0-9]/.test(pw),
+            };
+        }
+
+        function setRule(el, passing, label) {
+            el.textContent = (passing ? TICK : CROSS) + ' ' + label;
+            el.classList.toggle('pw-rule-pass', passing);
+            el.classList.toggle('pw-rule-fail', !passing);
+        }
+
+        function allPass(rules) {
+            return rules.length && rules.upper && rules.number;
+        }
+
+        pwInput.addEventListener('input', () => {
+            const r = checkRules(pwInput.value);
+            setRule(ruleLength, r.length, 'At least 8 characters');
+            setRule(ruleUpper,  r.upper,  'One uppercase letter');
+            setRule(ruleNumber, r.number, 'One number');
+
+            if (cfmInput.value.length > 0) updateMatchMsg();
+        });
+
+        function updateMatchMsg() {
+            const pw  = pwInput.value;
+            const cfm = cfmInput.value;
+            if (cfm.length === 0) {
+                matchMsg.textContent = '';
+                matchMsg.className = 'pw-match-msg';
+                return;
+            }
+            if (pw === cfm) {
+                matchMsg.textContent = TICK + ' Passwords match';
+                matchMsg.className = 'pw-match-msg pw-match-ok';
+            } else {
+                matchMsg.textContent = CROSS + ' Passwords do not match';
+                matchMsg.className = 'pw-match-msg pw-match-err';
+            }
+        }
+
+        cfmInput.addEventListener('input', updateMatchMsg);
+
+        document.querySelector('.auth-form').addEventListener('submit', function(e) {
+            const pw  = pwInput.value;
+            const cfm = cfmInput.value;
+            const r   = checkRules(pw);
+            let firstError = null;
+
+            const prev = document.getElementById('client-error');
+            if (prev) prev.remove();
+
+            if (!allPass(r)) {
+                e.preventDefault();
+                setRule(ruleLength, r.length, 'At least 8 characters');
+                setRule(ruleUpper,  r.upper,  'One uppercase letter');
+                setRule(ruleNumber, r.number, 'One number');
+                firstError = 'Password does not meet the requirements above.';
+            } else if (pw !== cfm) {
+                e.preventDefault();
+                matchMsg.textContent = CROSS + ' Passwords do not match';
+                matchMsg.className = 'pw-match-msg pw-match-err';
+                firstError = 'Passwords do not match.';
+            }
+
+            if (firstError) {
+                const msg = document.createElement('p');
+                msg.id = 'client-error';
+                msg.className = 'auth-error';
+                msg.textContent = firstError;
+                document.querySelector('.auth-form').before(msg);
+                msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+    </script>
+</body>
+</html>

@@ -9,6 +9,7 @@ services:
       - ./logs:/gouda-gaze/logs  # Persist logs on host
     network_mode: host
     environment:
+      - SECRET_KEY=${SECRET_KEY}
       - PI_IP_TS=${PI_IP_TS}
       - CAM_IP=${CAM_IP}
       - CAM_USER=${CAM_USER}

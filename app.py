@@ -5,20 +5,69 @@ import hashlib
 import threading
 from datetime import datetime
 from pathlib import Path
+import click
 import requests
 from requests.auth import HTTPDigestAuth
-from flask import Flask, render_template, jsonify, send_file, send_from_directory, request, abort
+from flask import (Flask, render_template, jsonify, send_file,
+                   send_from_directory, request, abort, redirect, url_for)
+from flask_login import LoginManager, login_required, current_user
+
 from logger_config import get_loggers
+from models import db, User
+from auth import auth_bp, admin_required
+from admin import admin_bp
 
 app = Flask(__name__)
 app_log, http_log, ptz_log, privacy_log = get_loggers()
+
+# ── Auth / DB config ──────────────────────────────────────
+app.config["SECRET_KEY"]                     = os.environ["SECRET_KEY"]
+app.config["SQLALCHEMY_DATABASE_URI"]        = os.environ.get("DB_PATH", "sqlite:///gouda-gaze.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db.init_app(app)
+
+login_manager = LoginManager(app)
+login_manager.login_view = "auth.login"
+login_manager.login_message = ""   # suppress default flash
+
+@login_manager.user_loader
+def load_user(user_id: str) -> User | None:
+    return User.query.get(int(user_id))
+
+app.register_blueprint(auth_bp)
+app.register_blueprint(admin_bp)
+
+# Inject pending count into all templates so the nav badge works
+@app.context_processor
+def inject_globals():
+    count = 0
+    if current_user.is_authenticated and current_user.is_admin:
+        count = User.query.filter_by(status="pending").count()
+    return {"pending_count": count}
+
+# ── CLI: bootstrap first admin ────────────────────────────
+@app.cli.command("create-admin")
+@click.option("--email",    prompt="Admin email")
+@click.option("--name",     prompt="Admin name")
+@click.option("--password", prompt="Password", hide_input=True, confirmation_prompt=True)
+def create_admin(email: str, name: str, password: str) -> None:
+    """Bootstrap the first admin user (run once after deploy)."""
+    db.create_all()
+    if User.query.filter_by(email=email.lower()).first():
+        click.echo(f"Error: {email} already exists.")
+        return
+    user = User(email=email.lower(), name=name, role="admin", status="approved")
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    click.echo(f"Admin user {email} created.")
 
 # --- Amcrest camera config from environment ---
 CAM_IP      = os.environ["CAM_IP"]
 CAM_USER    = os.environ["CAM_USER"]
 CAM_PASS    = os.environ["CAM_PASS"]
 CAM_CHANNEL = os.environ["CAM_CHANNEL"]
-PTZ_SPEED   = int(os.environ["PTZ_SPEED"])
 
 RPC2_URL       = f"http://{CAM_IP}/RPC2"
 RPC2_LOGIN_URL = f"http://{CAM_IP}/RPC2_Login"
@@ -32,7 +81,7 @@ SNAPSHOT_DIR = Path("./snapshots")
 SNAPSHOT_DIR.mkdir(exist_ok=True)
 
 # --- Privacy state ---
-# ACL HOOK: Replace with per-user lookup when ACL is implemented.
+# ACL HOOK: Replace with per-user lookup when per-user privacy is implemented.
 _privacy_enabled = False
 _privacy_lock    = threading.Lock()
 
@@ -54,10 +103,6 @@ BITRATE_RANGE      = (512, 8192)
 
 
 # ── RPC2 auth ─────────────────────────────────────────────
-#
-# Formula confirmed by intercepting faultylabs.MD5 calls in browser console:
-#   step1 = MD5(username + ":" + realm + ":" + password)
-#   step2 = MD5(username + ":" + random + ":" + step1)
 
 def _MD5(s: str) -> str:
     return hashlib.md5(s.encode()).hexdigest().upper()
@@ -304,7 +349,7 @@ def set_stream_settings(resolution: str, fps: int, bitrate: int, bitrate_ctrl: s
 # ── CGI helpers ───────────────────────────────────────────
 
 def is_privacy_on() -> bool:
-    # ACL HOOK: Check requesting user's privacy state here when ACL is added.
+    # ACL HOOK: Check requesting user's privacy state here when per-user privacy is added.
     return _privacy_enabled
 
 
@@ -312,7 +357,6 @@ def ptz_command(action: str, code: str) -> bool:
     url = (
         f"http://{CAM_IP}/cgi-bin/ptz.cgi"
         f"?action={action}&channel={CAM_CHANNEL}"
-        f"&code={code}&arg1={PTZ_SPEED}&arg2={PTZ_SPEED}&arg3=0"
     )
     try:
         resp = requests.get(url, auth=HTTPDigestAuth(CAM_USER, CAM_PASS), timeout=3)
@@ -342,36 +386,39 @@ def ptz_preset(preset_id: int = 1) -> bool:
 
 # ── Routes ────────────────────────────────────────────────
 
-@app.route('/')
+@app.route("/")
+@login_required
 def index():
     pi_ip = os.environ["PI_IP_TS"]
     _sync_privacy_from_camera()
-    http_log.info(f"GET / privacy={'ON' if is_privacy_on() else 'OFF'}")
-    return render_template('index.html', pi_ip=pi_ip, privacy=is_privacy_on())
+    http_log.info(f"GET / user={current_user.email} privacy={'ON' if is_privacy_on() else 'OFF'}")
+    return render_template("index.html", pi_ip=pi_ip, privacy=is_privacy_on())
 
 
-@app.route('/gallery')
+@app.route("/gallery")
+@login_required
 def gallery():
-    return render_template('gallery.html')
+    return render_template("gallery.html")
 
 
-@app.route('/privacy-image')
+@app.route("/privacy-image")
+@login_required
 def privacy_image():
-    return send_file('./privacy.png', mimetype='image/png')
+    return send_file("./privacy.png", mimetype="image/png")
 
 
-@app.route('/snapshots/<filename>')
+@app.route("/snapshots/<filename>")
+@login_required
 def serve_snapshot(filename: str):
-    """Serve an individual snapshot file."""
-    # Basic safety — only allow simple filenames, no path traversal
-    if '/' in filename or '..' in filename:
+    if "/" in filename or ".." in filename:
         abort(400)
-    return send_from_directory(SNAPSHOT_DIR, filename, mimetype='image/jpeg')
+    return send_from_directory(SNAPSHOT_DIR, filename, mimetype="image/jpeg")
 
 
 # ── Snapshot API ──────────────────────────────────────────
 
-@app.route('/api/snapshot', methods=['POST'])
+@app.route("/api/snapshot", methods=["POST"])
+@login_required
 def take_snapshot():
     if is_privacy_on():
         http_log.info("POST /api/snapshot blocked — privacy mode active")
@@ -392,7 +439,7 @@ def take_snapshot():
     filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".jpg"
     size_kb  = round(len(resp.content) / 1024, 1)
     save_snapshot(resp.content, filename)
-    http_log.info(f"POST /api/snapshot success — {filename} ({size_kb} KB)")
+    http_log.info(f"POST /api/snapshot success — {filename} ({size_kb} KB) user={current_user.email}")
 
     return jsonify({
         "status":   "success",
@@ -402,12 +449,9 @@ def take_snapshot():
     })
 
 
-@app.route('/api/snapshots', methods=['GET'])
+@app.route("/api/snapshots", methods=["GET"])
+@login_required
 def get_snapshots():
-    """
-    List all saved snapshots, newest first.
-    Future: accept ?page= and ?limit= query params for pagination.
-    """
     return jsonify({
         "status":    "success",
         "snapshots": list_snapshots(),
@@ -417,40 +461,42 @@ def get_snapshots():
 
 # ── Privacy API ───────────────────────────────────────────
 
-@app.route('/api/privacy/status')
+@app.route("/api/privacy/status")
+@login_required
 def privacy_status():
     return jsonify({"privacy": is_privacy_on()})
 
 
-@app.route('/api/privacy/on', methods=['POST'])
+@app.route("/api/privacy/on", methods=["POST"])
+@admin_required
 def privacy_on():
-    # ACL HOOK: Check if requesting user has permission to enable privacy mode.
     global _privacy_enabled
     with _privacy_lock:
         hw_ok = _hw_set_privacy(True)
         if not hw_ok:
             return jsonify({"status": "error", "message": "Camera privacy command failed"}), 502
         _privacy_enabled = True
-    privacy_log.info("Privacy mode: ON")
+    privacy_log.info(f"Privacy mode: ON (by {current_user.email})")
     return jsonify({"status": "success", "privacy": True})
 
 
-@app.route('/api/privacy/off', methods=['POST'])
+@app.route("/api/privacy/off", methods=["POST"])
+@admin_required
 def privacy_off():
-    # ACL HOOK: Check if requesting user has permission to disable privacy mode.
     global _privacy_enabled
     with _privacy_lock:
         hw_ok = _hw_set_privacy(False)
         if not hw_ok:
             return jsonify({"status": "error", "message": "Camera privacy command failed"}), 502
         _privacy_enabled = False
-    privacy_log.info("Privacy mode: OFF")
+    privacy_log.info(f"Privacy mode: OFF (by {current_user.email})")
     return jsonify({"status": "success", "privacy": False})
 
 
 # ── Stream settings API ───────────────────────────────────
 
-@app.route('/api/stream/settings', methods=['GET'])
+@app.route("/api/stream/settings", methods=["GET"])
+@admin_required
 def stream_settings_get():
     settings = get_stream_settings()
     if settings is None:
@@ -458,7 +504,8 @@ def stream_settings_get():
     return jsonify({"status": "success", "settings": settings})
 
 
-@app.route('/api/stream/settings', methods=['POST'])
+@app.route("/api/stream/settings", methods=["POST"])
+@admin_required
 def stream_settings_set():
     data = request.get_json()
     if not data:
@@ -486,7 +533,8 @@ def stream_settings_set():
 
 # ── PTZ API ───────────────────────────────────────────────
 
-@app.route('/api/move/start/<direction>')
+@app.route("/api/move/start/<direction>")
+@login_required
 def move_start(direction: str):
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
@@ -499,7 +547,8 @@ def move_start(direction: str):
     return jsonify({"status": "success", "action": "start", "direction": direction})
 
 
-@app.route('/api/move/stop/<direction>')
+@app.route("/api/move/stop/<direction>")
+@login_required
 def move_stop(direction: str):
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
@@ -512,17 +561,20 @@ def move_stop(direction: str):
     return jsonify({"status": "success", "action": "stop", "direction": direction})
 
 
-@app.route('/api/home')
+@app.route("/api/home")
+@login_required
 def home_camera():
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
     ok = ptz_preset(1)
     if not ok:
         return jsonify({"status": "error", "message": "Home preset failed"}), 502
-    ptz_log.info("Homed to preset 1")
+    ptz_log.info(f"Homed to preset 1 (by {current_user.email})")
     return jsonify({"status": "success", "action": "home"})
 
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
     app_log.info("Gouda Gaze starting")
-    app.run(host='0.0.0.0', port=1122, debug=False)
+    app.run(host="0.0.0.0", port=1122, debug=False)

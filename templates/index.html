@@ -14,7 +14,16 @@
         <nav class="page-nav">
             <a href="/" class="nav-link nav-link-active">&#9654; Live</a>
             <a href="/gallery" class="nav-link">&#9783; Gallery</a>
-            <span class="nav-link nav-link-disabled" id="login-btn">&#9750; Log In</span>
+            {% if current_user.is_admin %}
+            <a href="/admin/users" class="nav-link">
+                &#9881; Users
+                {% if pending_count > 0 %}
+                <span class="nav-badge">{{ pending_count }}</span>
+                {% endif %}
+            </a>
+            {% endif %}
+            <span class="nav-user">{{ current_user.name }}</span>
+            <a href="/logout" class="nav-link nav-link-logout">&#8594; Logout</a>
         </nav>
         <div id="main-layout">
 
@@ -74,8 +83,9 @@
                         <span class="action-btn-label" id="snapshot-label">Snapshot</span>
                     </button>
 
-                    <!-- Privacy button -->
-                    <button class="action-btn privacy-btn {{ 'privacy-on' if privacy else '' }}" id="privacy-btn">
+                    <!-- Privacy button — visible to all, toggleable by admins only -->
+                    <button class="action-btn privacy-btn {{ 'privacy-on' if privacy else '' }}" id="privacy-btn"
+                            {{ 'disabled' if not current_user.is_admin else '' }}>
                         {% if privacy %}
                         <!-- Unlocked padlock — privacy is ON, click to resume -->
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -99,7 +109,8 @@
 
         </div>
 
-        <!-- Stream settings panel -->
+        <!-- Stream settings panel — admin only -->
+        {% if current_user.is_admin %}
         <div id="settings-panel">
             <button id="settings-toggle" class="settings-toggle-btn" aria-expanded="false">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -162,6 +173,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
     </div>
 
