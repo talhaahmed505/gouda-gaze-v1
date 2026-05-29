@@ -68,6 +68,7 @@ CAM_IP      = os.environ["CAM_IP"]
 CAM_USER    = os.environ["CAM_USER"]
 CAM_PASS    = os.environ["CAM_PASS"]
 CAM_CHANNEL = os.environ["CAM_CHANNEL"]
+PTZ_SPEED   = int(os.environ["PTZ_SPEED"])
 
 RPC2_URL       = f"http://{CAM_IP}/RPC2"
 RPC2_LOGIN_URL = f"http://{CAM_IP}/RPC2_Login"
@@ -357,6 +358,7 @@ def ptz_command(action: str, code: str) -> bool:
     url = (
         f"http://{CAM_IP}/cgi-bin/ptz.cgi"
         f"?action={action}&channel={CAM_CHANNEL}"
+        f"&code={code}&arg1={PTZ_SPEED}&arg2={PTZ_SPEED}&arg3=0"
     )
     try:
         resp = requests.get(url, auth=HTTPDigestAuth(CAM_USER, CAM_PASS), timeout=3)
