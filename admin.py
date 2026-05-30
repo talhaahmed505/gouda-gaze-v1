@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, abort, redirect, render_template, request, url_for
+from flask import Blueprint, jsonify, render_template, request
 from flask_login import current_user
 
 from auth import admin_required
@@ -24,47 +24,55 @@ def users():
 @admin_bp.route("/users/<int:user_id>/approve", methods=["POST"])
 @admin_required
 def approve(user_id: int):
-    """Approve a pending or re-approve a denied user."""
-    user = User.query.get_or_404(user_id)
+    # CSRF HOOK: Add CSRF token validation before public internet exposure (Cloudflare/Funnel phase).
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"status": "error", "message": "User not found"}), 404
     user.status = "approved"
     db.session.commit()
-    return redirect(url_for("admin.users"))
+    return jsonify({"status": "success"})
 
 
 @admin_bp.route("/users/<int:user_id>/deny", methods=["POST"])
 @admin_required
 def deny(user_id: int):
-    """Deny a pending user's request."""
-    user = User.query.get_or_404(user_id)
+    # CSRF HOOK: Add CSRF token validation before public internet exposure.
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"status": "error", "message": "User not found"}), 404
     if user.id == current_user.id:
-        abort(400)   # can't deny yourself
+        return jsonify({"status": "error", "message": "Cannot deny yourself"}), 400
     user.status = "denied"
     db.session.commit()
-    return redirect(url_for("admin.users"))
+    return jsonify({"status": "success"})
 
 
 @admin_bp.route("/users/<int:user_id>/revoke", methods=["POST"])
 @admin_required
 def revoke(user_id: int):
-    """Revoke an approved user's access."""
-    user = User.query.get_or_404(user_id)
+    # CSRF HOOK: Add CSRF token validation before public internet exposure.
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"status": "error", "message": "User not found"}), 404
     if user.id == current_user.id:
-        abort(400)   # can't revoke yourself
+        return jsonify({"status": "error", "message": "Cannot revoke yourself"}), 400
     user.status = "denied"
     db.session.commit()
-    return redirect(url_for("admin.users"))
+    return jsonify({"status": "success"})
 
 
 @admin_bp.route("/users/<int:user_id>/role", methods=["POST"])
 @admin_required
 def change_role(user_id: int):
-    """Promote or demote a user between viewer and admin."""
-    user = User.query.get_or_404(user_id)
+    # CSRF HOOK: Add CSRF token validation before public internet exposure.
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"status": "error", "message": "User not found"}), 404
     if user.id == current_user.id:
-        abort(400)   # can't change your own role
-    new_role = request.form.get("role", "")
+        return jsonify({"status": "error", "message": "Cannot change your own role"}), 400
+    new_role = request.json.get("role", "") if request.is_json else request.form.get("role", "")
     if new_role not in ("viewer", "admin"):
-        abort(400)
+        return jsonify({"status": "error", "message": f"Invalid role: {new_role}"}), 400
     user.role = new_role
     db.session.commit()
-    return redirect(url_for("admin.users"))
+    return jsonify({"status": "success"})
