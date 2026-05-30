@@ -91,7 +91,7 @@ h1 {
     border-color: rgba(192, 57, 43, 0.6);
 }
 
-iframe, #video-viewport img {
+iframe, video, #video-viewport img {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -104,6 +104,11 @@ iframe, #video-viewport img {
 }
 
 /* ── Snapshot preview thumbnail ────────────────────────── */
+
+/* video element fills viewport identically to the old iframe */
+#video-viewport video {
+    background: #000;
+}
 
 .snapshot-preview {
     position: absolute;

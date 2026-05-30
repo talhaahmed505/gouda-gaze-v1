@@ -9,7 +9,8 @@ import click
 import requests
 from requests.auth import HTTPDigestAuth
 from flask import (Flask, render_template, jsonify, send_file,
-                   send_from_directory, request, abort, redirect, url_for)
+                   send_from_directory, request, abort, redirect, url_for,
+                   Response)
 from flask_login import LoginManager, login_required, current_user
 
 from logger_config import get_loggers
@@ -432,9 +433,8 @@ def ptz_preset(preset_id: int = 1) -> bool:
 @app.route("/")
 @login_required
 def index():
-    pi_ip = os.environ["PI_IP_TS"]
     _sync_privacy_from_camera()
-    return render_template("index.html", pi_ip=pi_ip, privacy=is_privacy_on())
+    return render_template("index.html", privacy=is_privacy_on())
 
 
 @app.route("/gallery")
@@ -613,6 +613,62 @@ def home_camera():
         return jsonify({"status": "error", "message": "Home preset failed"}), 502
     ptz_log.info(f"Homed to preset 1 (by {current_user.email})")
     return jsonify({"status": "success", "action": "home"})
+
+
+
+# ── go2rtc stream proxy ───────────────────────────────────
+#
+# go2rtc is bound to 127.0.0.1:1984 (localhost only) — port 1984
+# is invisible on the network. Flask is the only path to the stream,
+# so @login_required is enforced for all signaling.
+#
+# We use go2rtc's HTTP WebRTC API (POST /api/webrtc) instead of its
+# WebSocket signaling (api/ws). The requests library cannot proxy
+# WebSocket upgrades, but the HTTP API is a plain POST:
+#   client sends SDP offer → go2rtc returns SDP answer → WebRTC starts
+#
+# The browser's WebRTC peer connection is established directly between
+# the client and the Pi after signaling; Flask is not in the media path.
+
+GO2RTC_ORIGIN = "http://127.0.0.1:1984"
+
+
+@app.route("/stream/webrtc", methods=["POST"])
+@login_required
+def stream_webrtc_signal():
+    """
+    WebRTC HTTP signaling endpoint.
+    Accepts: SDP offer (text/plain or application/sdp)
+    Returns: SDP answer (text/plain)
+    Proxies to go2rtc's POST /api/webrtc?src=<stream>
+    """
+    if is_privacy_on():
+        return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
+
+    src = request.args.get("src", "cam")
+    offer_sdp = request.get_data(as_text=True)
+
+    if not offer_sdp.strip().startswith("v="):
+        app_log.warning(f"stream_webrtc_signal: invalid SDP from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "Invalid SDP offer"}), 400
+
+    try:
+        resp = requests.post(
+            f"{GO2RTC_ORIGIN}/api/webrtc",
+            params={"src": src},
+            data=offer_sdp,
+            headers={"Content-Type": "application/sdp"},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        app_log.error(f"go2rtc signaling error: {e}")
+        return jsonify({"status": "error", "message": "Stream unavailable"}), 502
+
+    if resp.status_code != 200:
+        app_log.error(f"go2rtc returned {resp.status_code}: {resp.text[:200]!r}")
+        return jsonify({"status": "error", "message": f"go2rtc error {resp.status_code}"}), 502
+
+    return Response(resp.text, content_type="application/sdp")
 
 
 if __name__ == "__main__":
