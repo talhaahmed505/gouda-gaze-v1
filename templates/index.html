@@ -249,8 +249,8 @@
         }
 
         // ── PTZ ──────────────────────────────────────────────
-        function startMove(dir) { fetch('/api/move/start/' + dir).catch(console.error); }
-        function stopMove(dir)  { fetch('/api/move/stop/'  + dir).catch(console.error); }
+        function startMove(dir) { fetch('/api/move/start/' + dir, { method: 'POST' }).catch(console.error); }
+        function stopMove(dir)  { fetch('/api/move/stop/'  + dir, { method: 'POST' }).catch(console.error); }
 
         document.querySelectorAll('.control-btn[data-dir]:not([disabled])').forEach(btn => {
             const dir = btn.dataset.dir;
@@ -268,7 +268,7 @@
                 slider.value = 100;
                 feed.style.transform = 'scale(1)';
                 zoomLabel.textContent = '1.0x';
-                fetch('/api/home').catch(console.error);
+                fetch('/api/home', { method: 'POST' }).catch(console.error);
             });
         }
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import hashlib
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import click
 import requests
@@ -26,6 +26,27 @@ app_log, http_log, auth_log, ptz_log, privacy_log = get_loggers()
 app.config["SECRET_KEY"]                     = os.environ["SECRET_KEY"]
 app.config["SQLALCHEMY_DATABASE_URI"]        = os.environ.get("DB_PATH", "sqlite:///gouda-gaze.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# ── Cookie hardening ──────────────────────────────────────
+# HttpOnly — JS cannot read the session cookie (XSS mitigation).
+# SameSite=Lax — cookie is not sent on cross-site POST requests (CSRF
+#   mitigation). Combined with state-changing endpoints now requiring POST,
+#   this blocks cross-site form/fetch CSRF without a token.
+# Secure — only transmit over HTTPS. Currently False because the app runs
+#   over plain HTTP on Tailscale.
+#   HTTPS HOOK (Phase 2/Caddy): flip both Secure flags to True once HTTPS
+#   is in place. Can also be driven by an env var:
+#   HTTPS_ENABLED=true → set True, default False.
+_https = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
+
+app.config["SESSION_COOKIE_HTTPONLY"]  = True
+app.config["SESSION_COOKIE_SAMESITE"]  = "Lax"
+app.config["SESSION_COOKIE_SECURE"]    = _https
+
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
+app.config["REMEMBER_COOKIE_SECURE"]   = _https
+app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
 
 db.init_app(app)
 
@@ -452,7 +473,13 @@ def privacy_image():
 @app.route("/snapshots/<filename>")
 @login_required
 def serve_snapshot(filename: str):
+    # Reject path traversal attempts and non-JPEG files.
+    # send_from_directory is already safe against directory escape, but
+    # explicitly restricting to .jpg prevents serving unexpected file types
+    # if anything other than snapshots ended up in SNAPSHOT_DIR.
     if "/" in filename or ".." in filename:
+        abort(400)
+    if not filename.lower().endswith(".jpg"):
         abort(400)
     return send_from_directory(SNAPSHOT_DIR, filename, mimetype="image/jpeg")
 
@@ -575,7 +602,7 @@ def stream_settings_set():
 
 # ── PTZ API ───────────────────────────────────────────────
 
-@app.route("/api/move/start/<direction>")
+@app.route("/api/move/start/<direction>", methods=["POST"])
 @login_required
 def move_start(direction: str):
     if is_privacy_on():
@@ -589,7 +616,7 @@ def move_start(direction: str):
     return jsonify({"status": "success", "action": "start", "direction": direction})
 
 
-@app.route("/api/move/stop/<direction>")
+@app.route("/api/move/stop/<direction>", methods=["POST"])
 @login_required
 def move_stop(direction: str):
     if is_privacy_on():
@@ -603,7 +630,7 @@ def move_stop(direction: str):
     return jsonify({"status": "success", "action": "stop", "direction": direction})
 
 
-@app.route("/api/home")
+@app.route("/api/home", methods=["POST"])
 @login_required
 def home_camera():
     if is_privacy_on():
@@ -645,8 +672,24 @@ def stream_webrtc_signal():
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
 
+    # Whitelist the stream name — only forward to known go2rtc streams
     src = request.args.get("src", "cam")
-    offer_sdp = request.get_data(as_text=True)
+    if src not in ("cam",):
+        app_log.warning(f"stream_webrtc_signal: unknown src {src!r} from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "Unknown stream"}), 400
+
+    # ── Fix 3: SDP size limit (valid SDPs are well under 8 KB; 64 KB is generous) ──
+    max_sdp = 65_536
+    content_length = request.content_length
+    if content_length and content_length > max_sdp:
+        app_log.warning(f"stream_webrtc_signal: oversized offer ({content_length}B) from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "SDP offer too large"}), 413
+
+    offer_sdp = request.get_data(as_text=True, cache=False)
+
+    if len(offer_sdp) > max_sdp:
+        app_log.warning(f"stream_webrtc_signal: oversized offer body from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "SDP offer too large"}), 413
 
     if not offer_sdp.strip().startswith("v="):
         app_log.warning(f"stream_webrtc_signal: invalid SDP from {get_client_ip()}")
@@ -664,10 +707,12 @@ def stream_webrtc_signal():
         app_log.error(f"go2rtc signaling error: {e}")
         return jsonify({"status": "error", "message": "Stream unavailable"}), 502
 
-    if resp.status_code != 200:
-        app_log.error(f"go2rtc returned {resp.status_code}: {resp.text[:200]!r}")
+    # go2rtc returns 201 (WHEP standard) for a successful offer/answer exchange
+    if resp.status_code not in (200, 201):
+        app_log.error(f"go2rtc returned unexpected {resp.status_code}: {resp.text[:400]!r}")
         return jsonify({"status": "error", "message": f"go2rtc error {resp.status_code}"}), 502
 
+    app_log.debug(f"go2rtc SDP answer ({resp.status_code}):\n{resp.text}")
     return Response(resp.text, content_type="application/sdp")
 
 
