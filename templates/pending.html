@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOUDA GAZE — Request Submitted</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="auth-page">
+    <div id="app-container">
+        <div id="top-bar">
+            <h1>Gouda Gaze</h1>
+        </div>
+
+        <div class="auth-card">
+            <p class="auth-heading">Request Submitted</p>
+            <p class="auth-subheading">
+                Your access request has been received. An admin will review it shortly —
+                once approved you'll be able to log in with the credentials you set.
+            </p>
+            <p class="auth-footer" style="margin-top: 8px;">
+                Already approved? <a href="/login">Log in</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

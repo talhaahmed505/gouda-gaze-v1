@@ -14,7 +14,16 @@
         <nav class="page-nav">
             <a href="/" class="nav-link">&#9654; Live</a>
             <a href="/gallery" class="nav-link nav-link-active">&#9783; Gallery</a>
-            <span class="nav-link nav-link-disabled" id="login-btn">&#9750; Log In</span>
+            {% if current_user.is_admin %}
+            <a href="/admin/users" class="nav-link">
+                &#9881; Users
+                {% if pending_count > 0 %}
+                <span class="nav-badge">{{ pending_count }}</span>
+                {% endif %}
+            </a>
+            {% endif %}
+            <span class="nav-user">{{ current_user.name }}</span>
+            <a href="/logout" class="nav-link nav-link-logout">&#8594; Logout</a>
         </nav>
 
         <div id="gallery-header">

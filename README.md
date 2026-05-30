@@ -1,15 +1,23 @@
 # gouda-gaze
-Locally hosted kitty came for the loml, Gouda
 
+A self-hosted kitty cam web app running on a Raspberry Pi. Built for Gouda.
 
-This will also serve to teach me how to make an actual app
+Streams live video from an Amcrest PTZ IP camera with a custom Flask frontend for camera control and remote access over Tailscale. The camera runs on a sandboxed local network with no direct internet access — all traffic goes through the Pi.
 
+The backend is Python/Flask talking to the camera over its CGI and RPC2 APIs. Video is handled by go2rtc which takes the camera's RTSP stream and serves it as WebRTC. Everything runs in Docker.
 
-All of the Python, HTML, CSS, and the Dockerfile was vibe coded with Gemini. Currently the app acts as a camera passthrough for my USB web cam.
-In the future (one i get it), there will a proper PTZ IP camera connected to the private Pi network and the project will have to be rewritten to support it. It will be a simplification though because a lot of the video processing can be done on the camera itself as it will jut output a RSTP stream rather than the Pi having to run ffmpeg.
+## Features
 
-#Next steps
-add more features from basic web console
-tailscale users
-built in users
-link the two
+Live WebRTC stream with PTZ controls, digital zoom, and a hardware privacy mode that physically flips the camera into its base. You can take snapshots from the live view and browse them in a gallery. Stream settings like resolution, framerate, and bitrate are configurable from the UI without touching the camera directly.
+
+## Stack
+
+Python, Flask, go2rtc, Docker Compose, Tailscale.
+
+## Setup
+
+Copy `.env.example` to `.env` and fill in your camera credentials, IP, and Tailscale hostname, then run `docker compose up -d`. See `.env.example` for the full list of variables.
+
+## Planned
+
+User auth and access control, PTZ preset management, motion detection with auto-snapshot, camera status indicator, day/night mode, image quality controls, timelapse.

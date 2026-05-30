@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOUDA GAZE — Users</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div id="app-container">
+        <div id="top-bar">
+            <h1>Gouda Gaze</h1>
+        </div>
+        <nav class="page-nav">
+            <a href="/" class="nav-link">&#9654; Live</a>
+            <a href="/gallery" class="nav-link">&#9783; Gallery</a>
+            <a href="/admin/users" class="nav-link nav-link-active">
+                &#9881; Users
+                {% if pending_count > 0 %}
+                <span class="nav-badge">{{ pending_count }}</span>
+                {% endif %}
+            </a>
+            <span class="nav-user">{{ current_user.name }}</span>
+            <a href="/logout" class="nav-link nav-link-logout">&#8594; Logout</a>
+        </nav>
+
+        <!-- ── Sub-tabs ──────────────────────────────────────── -->
+        <div class="subtab-bar">
+            <button class="subtab subtab-active" data-tab="requests">
+                Requests
+                {% set req_count = (pending | length) + (denied | length) %}
+                {% if req_count > 0 %}
+                <span class="subtab-badge {% if pending | length > 0 %}subtab-badge-alert{% endif %}">{{ req_count }}</span>
+                {% endif %}
+            </button>
+            <button class="subtab" data-tab="users">
+                Active Users
+                <span class="subtab-badge">{{ approved | length }}</span>
+            </button>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════
+             TAB: REQUESTS
+             ════════════════════════════════════════════════════ -->
+        <div class="tab-panel" id="tab-requests">
+
+            <!-- Pending -->
+            <div class="admin-section">
+                <div class="admin-section-title">
+                    Pending
+                    {% if pending %}
+                    <span class="admin-badge admin-badge-alert">{{ pending | length }}</span>
+                    {% endif %}
+                </div>
+
+                <table class="admin-table">
+                    <colgroup>
+                        <col class="col-name">
+                        <col class="col-email">
+                        <col class="col-status">
+                        <col class="col-date">
+                        <col class="col-actions">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            <th>Requested Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if pending %}
+                        {% for user in pending %}
+                        <tr class="user-row" data-user-id="{{ user.id }}" data-user-name="{{ user.name }}">
+                            <td class="td-name">{{ user.name }}</td>
+                            <td style="opacity:0.7;">{{ user.email }}</td>
+                            <td><span class="status-badge status-pending" data-status-display>Pending</span></td>
+                            <td style="opacity:0.5;font-size:0.75rem;">{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <div class="admin-actions">
+                                    <button class="btn-sm btn-sm-approve action-btn"
+                                            data-action="approve"
+                                            data-endpoint="/admin/users/{{ user.id }}/approve"
+                                            data-from="Pending"
+                                            data-to="Approved">
+                                        Approve
+                                    </button>
+                                    <button class="btn-sm btn-sm-deny action-btn"
+                                            data-action="deny"
+                                            data-endpoint="/admin/users/{{ user.id }}/deny"
+                                            data-from="Pending"
+                                            data-to="Denied">
+                                        Deny
+                                    </button>
+                                    <button class="btn-sm btn-sm-cancel dequeue-btn" style="display:none;" aria-label="Cancel change">&#10005;</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr><td colspan="5" class="admin-empty-row">No pending requests.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Denied -->
+            <div class="admin-section">
+                <div class="admin-section-title">
+                    Denied
+                    <span class="admin-badge" style="opacity:0.5;">{{ denied | length }}</span>
+                </div>
+                <table class="admin-table">
+                    <colgroup>
+                        <col class="col-name">
+                        <col class="col-email">
+                        <col class="col-status">
+                        <col class="col-date">
+                        <col class="col-actions">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            <th>Denied Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if denied %}
+                        {% for user in denied %}
+                        <tr class="user-row" data-user-id="{{ user.id }}" data-user-name="{{ user.name }}" style="opacity:0.6;">
+                            <td class="td-name">{{ user.name }}</td>
+                            <td>{{ user.email }}</td>
+                            <td><span class="status-badge status-denied" data-status-display>Denied</span></td>
+                            <td style="font-size:0.75rem;">{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <div class="admin-actions">
+                                    <button class="btn-sm btn-sm-approve action-btn"
+                                            data-action="approve"
+                                            data-endpoint="/admin/users/{{ user.id }}/approve"
+                                            data-from="Denied"
+                                            data-to="Approved">
+                                        Re-approve
+                                    </button>
+                                    <button class="btn-sm btn-sm-cancel dequeue-btn" style="display:none;" aria-label="Cancel change">&#10005;</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr><td colspan="5" class="admin-empty-row">No denied users.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════
+             TAB: ACTIVE USERS
+             ════════════════════════════════════════════════════ -->
+        <div class="tab-panel" id="tab-users" style="display:none;">
+            <div class="admin-section">
+                <div class="admin-section-title">
+                    Active Users
+                    <span class="admin-badge">{{ approved | length }}</span>
+                </div>
+
+                {% if approved %}
+                <table class="admin-table">
+                    <colgroup>
+                        <col class="col-name">
+                        <col class="col-email">
+                        <col class="col-status">
+                        <col class="col-date">
+                        <col class="col-actions">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            <th>Approval Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in approved %}
+                        <tr class="user-row" data-user-id="{{ user.id }}" data-user-name="{{ user.name }}">
+                            <td class="td-name">
+                                {{ user.name }}
+                                {% if user.id == current_user.id %}
+                                <span class="admin-you-badge">(you)</span>
+                                {% endif %}
+                            </td>
+                            <td style="opacity:0.7;">{{ user.email }}</td>
+                            <td>
+                                {% if user.id != current_user.id %}
+                                <select class="role-select"
+                                        data-original="{{ user.role }}"
+                                        data-endpoint="/admin/users/{{ user.id }}/role"
+                                        data-from="{{ user.role }}"
+                                        data-to="{{ user.role }}">
+                                    <option value="viewer" {{ 'selected' if user.role == 'viewer' else '' }}>viewer</option>
+                                    <option value="admin"  {{ 'selected' if user.role == 'admin'  else '' }}>admin</option>
+                                </select>
+                                {% else %}
+                                <span class="role-badge {{ 'role-admin' if user.is_admin else 'role-viewer' }}">{{ user.role }}</span>
+                                {% endif %}
+                            </td>
+                            <td style="opacity:0.5;font-size:0.75rem;">{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                {% if user.id != current_user.id %}
+                                <div class="admin-actions">
+                                    <button class="btn-sm btn-sm-revoke action-btn"
+                                            data-action="revoke"
+                                            data-endpoint="/admin/users/{{ user.id }}/revoke"
+                                            data-from="Active"
+                                            data-to="Revoked">
+                                        Revoke
+                                    </button>
+                                    <button class="btn-sm btn-sm-cancel dequeue-btn" style="display:none;" aria-label="Cancel change">&#10005;</button>
+                                </div>
+                                {% else %}
+                                <span style="opacity:0.25;font-size:0.75rem;">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="admin-empty">No active users.</p>
+                {% endif %}
+            </div>
+        </div>
+
+    </div><!-- /#app-container -->
+
+    <!-- ── Sticky batch bar ──────────────────────────────── -->
+    <div class="batch-bar" id="batch-bar" aria-live="polite">
+        <span class="batch-count" id="batch-count">0 changes pending</span>
+        <button class="batch-apply-btn" id="batch-apply-btn">Review &amp; Apply</button>
+    </div>
+
+    <!-- ── Confirm modal ─────────────────────────────────── -->
+    <div class="modal-backdrop" id="confirm-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal">
+            <p class="modal-title" id="modal-title">Review Changes</p>
+            <table class="modal-table" id="modal-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Change</th>
+                    </tr>
+                </thead>
+                <tbody id="modal-body"></tbody>
+            </table>
+            <div class="modal-footer">
+                <button class="btn-sm" id="modal-back-btn">&#8592; Go Back</button>
+                <button class="btn-sm btn-sm-approve" id="modal-apply-btn">Apply Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Nav guard modal ───────────────────────────────── -->
+    <div class="modal-backdrop" id="nav-guard-modal" style="display:none;" role="dialog" aria-modal="true">
+        <div class="modal">
+            <p class="modal-title">Unsaved Changes</p>
+            <p class="modal-body-text" id="nav-guard-count"></p>
+            <div class="modal-footer">
+                <button class="btn-sm btn-sm-deny" id="nav-guard-leave">Leave Anyway</button>
+                <button class="btn-sm" id="nav-guard-stay">Stay</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (() => {
+        // ── State ─────────────────────────────────────────────
+        // queue: { userId(str) → { name, from, to, endpoint, payload } }
+        const queue = {};
+
+        // ── DOM refs ──────────────────────────────────────────
+        const batchBar      = document.getElementById('batch-bar');
+        const batchCount    = document.getElementById('batch-count');
+        const batchApplyBtn = document.getElementById('batch-apply-btn');
+        const confirmModal  = document.getElementById('confirm-modal');
+        const modalBody     = document.getElementById('modal-body');
+        const modalBackBtn  = document.getElementById('modal-back-btn');
+        const modalApplyBtn = document.getElementById('modal-apply-btn');
+        const navGuardModal = document.getElementById('nav-guard-modal');
+        const navGuardCount = document.getElementById('nav-guard-count');
+        const navGuardLeave = document.getElementById('nav-guard-leave');
+        const navGuardStay  = document.getElementById('nav-guard-stay');
+
+        // ── Helpers ───────────────────────────────────────────
+        function queueSize() { return Object.keys(queue).length; }
+
+        function updateBatchBar() {
+            const n = queueSize();
+            batchBar.classList.toggle('batch-bar-visible', n > 0);
+            batchCount.textContent = n === 1 ? '1 change pending' : `${n} changes pending`;
+        }
+
+        function rowForId(userId) {
+            return document.querySelector(`.user-row[data-user-id="${userId}"]`);
+        }
+
+        function enqueue(userId, entry) {
+            queue[userId] = entry;
+            updateBatchBar();
+            const row = rowForId(userId);
+            if (row) {
+                row.classList.add('row-queued');
+                // show cancel, disable other action-btns on this row
+                row.querySelectorAll('.action-btn').forEach(b => {
+                    b.disabled = true;
+                    b.classList.add('btn-sm-disabled');
+                });
+                row.querySelectorAll('.dequeue-btn').forEach(b => b.style.display = '');
+                row.querySelectorAll('.role-select').forEach(s => s.disabled = true);
+                // update status badge preview
+                const badge = row.querySelector('[data-status-display]');
+                if (badge) {
+                    badge.textContent = entry.to;
+                    badge.className = 'status-badge status-queued';
+                }
+            }
+        }
+
+        function dequeue(userId) {
+            delete queue[userId];
+            updateBatchBar();
+            const row = rowForId(userId);
+            if (row) {
+                row.classList.remove('row-queued');
+                row.querySelectorAll('.action-btn').forEach(b => {
+                    b.disabled = false;
+                    b.classList.remove('btn-sm-disabled');
+                });
+                row.querySelectorAll('.dequeue-btn').forEach(b => b.style.display = 'none');
+                // restore role selects
+                row.querySelectorAll('.role-select').forEach(s => {
+                    s.disabled = false;
+                    // if role select, re-check vs original
+                    const original = s.dataset.original;
+                    if (s.value !== original) {
+                        // still dirty — re-enqueue
+                        s.value = original; // reset visually
+                    }
+                });
+                // restore status badge
+                const badge = row.querySelector('[data-status-display]');
+                if (badge) {
+                    const orig = badge.dataset.orig || badge.textContent;
+                    badge.textContent = orig;
+                    // restore class from original text
+                    const cls = orig.toLowerCase() === 'pending' ? 'status-pending'
+                              : orig.toLowerCase() === 'denied'  ? 'status-denied'
+                              : 'status-pending';
+                    badge.className = `status-badge ${cls}`;
+                }
+            }
+        }
+
+        // Store original badge text on page load
+        document.querySelectorAll('[data-status-display]').forEach(badge => {
+            badge.dataset.orig = badge.textContent.trim();
+        });
+
+        // ── Action buttons ────────────────────────────────────
+        document.querySelectorAll('.action-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const row      = btn.closest('.user-row');
+                const userId   = row.dataset.userId;
+                const userName = row.dataset.userName;
+                const from     = btn.dataset.from;
+                const to       = btn.dataset.to;
+                const endpoint = btn.dataset.endpoint;
+                enqueue(userId, { name: userName, from, to, endpoint, payload: null });
+            });
+        });
+
+        // ── Role selects ──────────────────────────────────────
+        document.querySelectorAll('.role-select').forEach(sel => {
+            sel.addEventListener('change', () => {
+                const row      = sel.closest('.user-row');
+                const userId   = row.dataset.userId;
+                const userName = row.dataset.userName;
+                const original = sel.dataset.original;
+                const newRole  = sel.value;
+
+                if (newRole === original) {
+                    // reset to original — dequeue if queued
+                    if (queue[userId]) dequeue(userId);
+                    return;
+                }
+                // Capitalise for display
+                const from = original.charAt(0).toUpperCase() + original.slice(1);
+                const to   = newRole.charAt(0).toUpperCase()  + newRole.slice(1);
+                enqueue(userId, {
+                    name: userName, from, to,
+                    endpoint: sel.dataset.endpoint,
+                    payload: { role: newRole }
+                });
+            });
+        });
+
+        // ── Dequeue buttons ───────────────────────────────────
+        document.querySelectorAll('.dequeue-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const row    = btn.closest('.user-row');
+                const userId = row.dataset.userId;
+                // also reset role select if present
+                const sel = row.querySelector('.role-select');
+                if (sel) sel.value = sel.dataset.original;
+                dequeue(userId);
+            });
+        });
+
+        // ── Review & Apply ────────────────────────────────────
+        batchApplyBtn.addEventListener('click', openConfirmModal);
+
+        function openConfirmModal() {
+            modalBody.innerHTML = '';
+            Object.values(queue).forEach(entry => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${entry.name}</td><td class="modal-change-cell"><span class="modal-from">${entry.from}</span><span class="modal-arrow">&#8594;</span><span class="modal-to">${entry.to}</span></td>`;
+                modalBody.appendChild(tr);
+            });
+            // Reset apply button state
+            modalApplyBtn.disabled = false;
+            modalApplyBtn.textContent = 'Apply Changes';
+            document.getElementById('modal-title').textContent = 'Review Changes';
+            confirmModal.style.display = 'flex';
+        }
+
+        modalBackBtn.addEventListener('click', () => { confirmModal.style.display = 'none'; });
+
+        modalApplyBtn.addEventListener('click', async () => {
+            modalApplyBtn.disabled = true;
+            modalApplyBtn.textContent = 'Applying…';
+
+            const entries   = Object.entries(queue); // [ [userId, entry], … ]
+            const failed    = [];
+            const succeeded = [];
+
+            for (const [userId, entry] of entries) {
+                try {
+                    const opts = {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: entry.payload ? JSON.stringify(entry.payload) : '{}'
+                    };
+                    const resp = await fetch(entry.endpoint, opts);
+                    const data = await resp.json();
+                    if (!resp.ok || data.status !== 'success') {
+                        failed.push({ entry, message: data.message || `HTTP ${resp.status}` });
+                    } else {
+                        succeeded.push(entry);
+                    }
+                } catch (err) {
+                    failed.push({ entry, message: 'Network error' });
+                }
+            }
+
+            if (failed.length === 0) {
+                // All good — clear beforeunload guard and reload
+                allowLeaveAndGo();
+            } else {
+                // Show partial-failure summary
+                document.getElementById('modal-title').textContent =
+                    `${succeeded.length} applied, ${failed.length} failed`;
+                modalBody.innerHTML = '';
+                failed.forEach(({ entry, message }) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${entry.name}</td><td class="modal-change-cell modal-change-error">${entry.from} &#8594; ${entry.to} <span class="modal-err-msg">${message}</span></td>`;
+                    modalBody.appendChild(tr);
+                });
+                modalApplyBtn.textContent = 'Reload';
+                modalApplyBtn.disabled = false;
+                modalApplyBtn.onclick = () => { allowLeaveAndGo(); };
+            }
+        });
+
+        // ── Sub-tabs ──────────────────────────────────────────
+        document.querySelectorAll('.subtab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                if (queueSize() > 0) {
+                    showNavGuard(() => switchTab(tab.dataset.tab));
+                    return;
+                }
+                switchTab(tab.dataset.tab);
+            });
+        });
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.subtab').forEach(t => t.classList.toggle('subtab-active', t.dataset.tab === tabId));
+            document.querySelectorAll('.tab-panel').forEach(p => p.style.display = p.id === `tab-${tabId}` ? '' : 'none');
+        }
+
+        // ── Nav guard ─────────────────────────────────────────
+        let pendingNavTarget = null;
+
+        function showNavGuard(onLeave) {
+            const n = queueSize();
+            navGuardCount.textContent = `You have ${n} unsaved change${n !== 1 ? 's' : ''}. If you leave, they will be lost.`;
+            navGuardModal.style.display = 'flex';
+            navGuardLeave.onclick = () => {
+                navGuardModal.style.display = 'none';
+                onLeave(); _allowLeave = true;
+            };
+            navGuardStay.onclick = () => { navGuardModal.style.display = 'none'; };
+        }
+
+        // Intercept in-app nav links
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', e => {
+                if (queueSize() === 0) return;
+                e.preventDefault();
+                const href = link.getAttribute('href');
+                if (!href || href === '#') return;
+                showNavGuard(() => allowLeaveAndGo(href));
+            });
+        });
+
+        // Browser-level guard (back, close, address bar)
+        // Uses a flag so we can suppress it on intentional reloads (apply/leave)
+        let _allowLeave = false;
+        window.addEventListener('beforeunload', e => {
+            if (_allowLeave || queueSize() === 0) return;
+            e.preventDefault();
+            e.returnValue = '';
+        });
+        function allowLeaveAndGo(url) { _allowLeave = true; if (url) window.location.href = url; else window.location.reload(); }
+
+    })();
+    </script>
+</body>
+</html>
