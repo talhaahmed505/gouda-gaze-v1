@@ -24,7 +24,7 @@
             <a href="/logout" class="nav-link nav-link-logout">&#8594; Logout</a>
         </nav>
 
-        <!--Sub-tabs-->
+        <!-- ── Sub-tabs ──────────────────────────────────────── -->
         <div class="subtab-bar">
             <button class="subtab subtab-active" data-tab="requests">
                 Requests
@@ -39,7 +39,9 @@
             </button>
         </div>
 
-        <!-- TAB: REQUESTS -->
+        <!-- ════════════════════════════════════════════════════
+             TAB: REQUESTS
+             ════════════════════════════════════════════════════ -->
         <div class="tab-panel" id="tab-requests">
 
             <!-- Pending -->
@@ -51,7 +53,6 @@
                     {% endif %}
                 </div>
 
-                {% if pending %}
                 <table class="admin-table">
                     <colgroup>
                         <col class="col-name">
@@ -70,6 +71,7 @@
                         </tr>
                     </thead>
                     <tbody>
+                        {% if pending %}
                         {% for user in pending %}
                         <tr class="user-row" data-user-id="{{ user.id }}" data-user-name="{{ user.name }}">
                             <td class="td-name">{{ user.name }}</td>
@@ -97,15 +99,14 @@
                             </td>
                         </tr>
                         {% endfor %}
+                        {% else %}
+                        <tr><td colspan="5" class="admin-empty-row">No pending requests.</td></tr>
+                        {% endif %}
                     </tbody>
                 </table>
-                {% else %}
-                <p class="admin-empty">No pending requests.</p>
-                {% endif %}
             </div>
 
             <!-- Denied -->
-            {% if denied %}
             <div class="admin-section">
                 <div class="admin-section-title">
                     Denied
@@ -129,6 +130,7 @@
                         </tr>
                     </thead>
                     <tbody>
+                        {% if denied %}
                         {% for user in denied %}
                         <tr class="user-row" data-user-id="{{ user.id }}" data-user-name="{{ user.name }}" style="opacity:0.6;">
                             <td class="td-name">{{ user.name }}</td>
@@ -149,17 +151,17 @@
                             </td>
                         </tr>
                         {% endfor %}
+                        {% else %}
+                        <tr><td colspan="5" class="admin-empty-row">No denied users.</td></tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
-            {% endif %}
-
-            {% if not pending and not denied %}
-            <p class="admin-empty" style="padding-top:24px;">No pending or denied requests.</p>
-            {% endif %}
         </div>
 
-        <!--   TAB: ACTIVE USERS   -->
+        <!-- ════════════════════════════════════════════════════
+             TAB: ACTIVE USERS
+             ════════════════════════════════════════════════════ -->
         <div class="tab-panel" id="tab-users" style="display:none;">
             <div class="admin-section">
                 <div class="admin-section-title">
@@ -238,13 +240,13 @@
 
     </div><!-- /#app-container -->
 
-    <!-- Sticky batch bar  -->
+    <!-- ── Sticky batch bar ──────────────────────────────── -->
     <div class="batch-bar" id="batch-bar" aria-live="polite">
         <span class="batch-count" id="batch-count">0 changes pending</span>
         <button class="batch-apply-btn" id="batch-apply-btn">Review &amp; Apply</button>
     </div>
 
-    <!-- Confirm modal  -->
+    <!-- ── Confirm modal ─────────────────────────────────── -->
     <div class="modal-backdrop" id="confirm-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal">
             <p class="modal-title" id="modal-title">Review Changes</p>
@@ -264,7 +266,7 @@
         </div>
     </div>
 
-    <!-- Nav guard modal  -->
+    <!-- ── Nav guard modal ───────────────────────────────── -->
     <div class="modal-backdrop" id="nav-guard-modal" style="display:none;" role="dialog" aria-modal="true">
         <div class="modal">
             <p class="modal-title">Unsaved Changes</p>
@@ -278,10 +280,11 @@
 
     <script>
     (() => {
-        // State 
+        // ── State ─────────────────────────────────────────────
         // queue: { userId(str) → { name, from, to, endpoint, payload } }
         const queue = {};
-        // DOM refs 
+
+        // ── DOM refs ──────────────────────────────────────────
         const batchBar      = document.getElementById('batch-bar');
         const batchCount    = document.getElementById('batch-count');
         const batchApplyBtn = document.getElementById('batch-apply-btn');
@@ -294,7 +297,7 @@
         const navGuardLeave = document.getElementById('nav-guard-leave');
         const navGuardStay  = document.getElementById('nav-guard-stay');
 
-        // Helpers 
+        // ── Helpers ───────────────────────────────────────────
         function queueSize() { return Object.keys(queue).length; }
 
         function updateBatchBar() {
@@ -369,7 +372,7 @@
             badge.dataset.orig = badge.textContent.trim();
         });
 
-        // Action buttons 
+        // ── Action buttons ────────────────────────────────────
         document.querySelectorAll('.action-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const row      = btn.closest('.user-row');
@@ -382,7 +385,7 @@
             });
         });
 
-        // Role selects 
+        // ── Role selects ──────────────────────────────────────
         document.querySelectorAll('.role-select').forEach(sel => {
             sel.addEventListener('change', () => {
                 const row      = sel.closest('.user-row');
@@ -407,7 +410,7 @@
             });
         });
 
-        // Dequeue buttons 
+        // ── Dequeue buttons ───────────────────────────────────
         document.querySelectorAll('.dequeue-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const row    = btn.closest('.user-row');
@@ -419,7 +422,7 @@
             });
         });
 
-        // Review & Apply 
+        // ── Review & Apply ────────────────────────────────────
         batchApplyBtn.addEventListener('click', openConfirmModal);
 
         function openConfirmModal() {
@@ -467,8 +470,7 @@
 
             if (failed.length === 0) {
                 // All good — clear beforeunload guard and reload
-                window.onbeforeunload = null;
-                window.location.reload();
+                allowLeaveAndGo();
             } else {
                 // Show partial-failure summary
                 document.getElementById('modal-title').textContent =
@@ -481,11 +483,11 @@
                 });
                 modalApplyBtn.textContent = 'Reload';
                 modalApplyBtn.disabled = false;
-                modalApplyBtn.onclick = () => { window.onbeforeunload = null; window.location.reload(); };
+                modalApplyBtn.onclick = () => { allowLeaveAndGo(); };
             }
         });
 
-        // Sub-tabs 
+        // ── Sub-tabs ──────────────────────────────────────────
         document.querySelectorAll('.subtab').forEach(tab => {
             tab.addEventListener('click', () => {
                 if (queueSize() > 0) {
@@ -501,7 +503,7 @@
             document.querySelectorAll('.tab-panel').forEach(p => p.style.display = p.id === `tab-${tabId}` ? '' : 'none');
         }
 
-        // Nav guard 
+        // ── Nav guard ─────────────────────────────────────────
         let pendingNavTarget = null;
 
         function showNavGuard(onLeave) {
@@ -510,8 +512,7 @@
             navGuardModal.style.display = 'flex';
             navGuardLeave.onclick = () => {
                 navGuardModal.style.display = 'none';
-                window.onbeforeunload = null;
-                onLeave();
+                onLeave(); _allowLeave = true;
             };
             navGuardStay.onclick = () => { navGuardModal.style.display = 'none'; };
         }
@@ -523,16 +524,19 @@
                 e.preventDefault();
                 const href = link.getAttribute('href');
                 if (!href || href === '#') return;
-                showNavGuard(() => { window.location.href = href; });
+                showNavGuard(() => allowLeaveAndGo(href));
             });
         });
 
         // Browser-level guard (back, close, address bar)
+        // Uses a flag so we can suppress it on intentional reloads (apply/leave)
+        let _allowLeave = false;
         window.addEventListener('beforeunload', e => {
-            if (queueSize() === 0) return;
+            if (_allowLeave || queueSize() === 0) return;
             e.preventDefault();
             e.returnValue = '';
         });
+        function allowLeaveAndGo(url) { _allowLeave = true; if (url) window.location.href = url; else window.location.reload(); }
 
     })();
     </script>

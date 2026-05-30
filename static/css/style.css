@@ -1650,3 +1650,12 @@ body.lightbox-open {
     justify-content: flex-end;
     gap: 10px;
 }
+
+/* ── Empty row inside table (consistent with table layout) ─ */
+.admin-empty-row {
+    text-align: left !important;
+    font-size: 0.75rem;
+    opacity: 0.3;
+    padding: 14px 12px !important;
+    letter-spacing: 0.5px;
+}
