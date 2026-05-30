@@ -10,6 +10,8 @@ The backend is Python/Flask talking to the camera over its CGI and RPC2 APIs. Vi
 
 Live WebRTC stream with PTZ controls, digital zoom, and a hardware privacy mode that physically flips the camera into its base. You can take snapshots from the live view and browse them in a gallery. Stream settings like resolution, framerate, and bitrate are configurable from the UI without touching the camera directly.
 
+Password based authentication and role based access control. Requestable and revokable access with full logging. 
+
 ## Stack
 
 Python, Flask, go2rtc, Docker Compose, Tailscale.
