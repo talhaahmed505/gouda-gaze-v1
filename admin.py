@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from flask import Blueprint, jsonify, render_template, request
 from flask_login import current_user
 
@@ -7,7 +9,10 @@ from auth import admin_required
 from models import User, db
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+auth_log = logging.getLogger("auth")
 
+
+# ── Views ──────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/users")
 @admin_required
@@ -21,6 +26,8 @@ def users():
                            denied=denied)
 
 
+# ── API endpoints ──────────────────────────────────────────────────────────────
+
 @admin_bp.route("/users/<int:user_id>/approve", methods=["POST"])
 @admin_required
 def approve(user_id: int):
@@ -28,8 +35,13 @@ def approve(user_id: int):
     user = db.session.get(User, user_id)
     if user is None:
         return jsonify({"status": "error", "message": "User not found"}), 404
+    prev_status = user.status
     user.status = "approved"
     db.session.commit()
+    auth_log.info(
+        f"ADMIN_APPROVE | admin={current_user.email}"
+        f" | target={user.email} | prev_status={prev_status}"
+    )
     return jsonify({"status": "success"})
 
 
@@ -44,6 +56,9 @@ def deny(user_id: int):
         return jsonify({"status": "error", "message": "Cannot deny yourself"}), 400
     user.status = "denied"
     db.session.commit()
+    auth_log.info(
+        f"ADMIN_DENY | admin={current_user.email} | target={user.email}"
+    )
     return jsonify({"status": "success"})
 
 
@@ -58,6 +73,9 @@ def revoke(user_id: int):
         return jsonify({"status": "error", "message": "Cannot revoke yourself"}), 400
     user.status = "denied"
     db.session.commit()
+    auth_log.info(
+        f"ADMIN_REVOKE | admin={current_user.email} | target={user.email}"
+    )
     return jsonify({"status": "success"})
 
 
@@ -73,6 +91,11 @@ def change_role(user_id: int):
     new_role = request.json.get("role", "") if request.is_json else request.form.get("role", "")
     if new_role not in ("viewer", "admin"):
         return jsonify({"status": "error", "message": f"Invalid role: {new_role}"}), 400
+    old_role = user.role
     user.role = new_role
     db.session.commit()
+    auth_log.info(
+        f"ADMIN_ROLE_CHANGE | admin={current_user.email}"
+        f" | target={user.email} | {old_role} -> {new_role}"
+    )
     return jsonify({"status": "success"})

@@ -13,12 +13,13 @@ from flask import (Flask, render_template, jsonify, send_file,
 from flask_login import LoginManager, login_required, current_user
 
 from logger_config import get_loggers
+from time import monotonic
 from models import db, User
 from auth import auth_bp, admin_required
 from admin import admin_bp
 
 app = Flask(__name__)
-app_log, http_log, ptz_log, privacy_log = get_loggers()
+app_log, http_log, auth_log, ptz_log, privacy_log = get_loggers()
 
 # ── Auth / DB config ──────────────────────────────────────
 app.config["SECRET_KEY"]                     = os.environ["SECRET_KEY"]
@@ -37,6 +38,43 @@ def load_user(user_id: str) -> User | None:
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
+
+# ── IP helper ────────────────────────────────────────────
+def get_client_ip() -> str:
+    """
+    Return the real client IP.
+    PROXY HOOK (Phase 2/Caddy): when a reverse proxy is in front, remote_addr
+    will be 127.0.0.1. Uncomment the X-Forwarded-For line and configure Caddy
+    to set it. Validate the proxy IP before trusting the header in production.
+    """
+    # forwarded = request.headers.get("X-Forwarded-For", "")
+    # if forwarded:
+    #     return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+# ── HTTP access log (every request) ──────────────────────
+@app.before_request
+def _start_timer():
+    request._start_time = monotonic()
+
+
+@app.after_request
+def _log_request(response):
+    elapsed_ms = round((monotonic() - getattr(request, "_start_time", monotonic())) * 1000)
+    try:
+        from flask_login import current_user
+        user = current_user.email if current_user.is_authenticated else "[anonymous]"
+    except Exception:
+        user = "[unknown]"
+    # Skip static assets — noisy and low value
+    if not request.path.startswith("/static/"):
+        http_log.info(
+            f"{request.method} {request.path} {response.status_code}"
+            f" | {user} | {get_client_ip()} | {elapsed_ms}ms"
+        )
+    return response
+
 
 # Inject pending count into all templates so the nav badge works
 @app.context_processor
@@ -360,10 +398,13 @@ def ptz_command(action: str, code: str) -> bool:
         f"?action={action}&channel={CAM_CHANNEL}"
         f"&code={code}&arg1={PTZ_SPEED}&arg2={PTZ_SPEED}&arg3=0"
     )
+    ptz_log.debug(f"PTZ URL: {url}")
     try:
         resp = requests.get(url, auth=HTTPDigestAuth(CAM_USER, CAM_PASS), timeout=3)
         ok = resp.status_code == 200
         ptz_log.info(f"PTZ {action} {code} -> {resp.status_code}")
+        if not ok:
+            ptz_log.error(f"PTZ {action} {code} failed — camera body: {resp.text[:200]!r}")
         return ok
     except requests.RequestException as e:
         ptz_log.error(f"PTZ error ({action} {code}): {e}")
@@ -393,7 +434,6 @@ def ptz_preset(preset_id: int = 1) -> bool:
 def index():
     pi_ip = os.environ["PI_IP_TS"]
     _sync_privacy_from_camera()
-    http_log.info(f"GET / user={current_user.email} privacy={'ON' if is_privacy_on() else 'OFF'}")
     return render_template("index.html", pi_ip=pi_ip, privacy=is_privacy_on())
 
 
