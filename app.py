@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import os
 import hashlib
+import secrets
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import click
 import requests
 from requests.auth import HTTPDigestAuth
 from flask import (Flask, render_template, jsonify, send_file,
-                   send_from_directory, request, abort, redirect, url_for)
+                   send_from_directory, request, abort, redirect, url_for,
+                   Response, session)
 from flask_login import LoginManager, login_required, current_user
 
 from logger_config import get_loggers
@@ -17,6 +19,7 @@ from time import monotonic
 from models import db, User
 from auth import auth_bp, admin_required
 from admin import admin_bp
+from limiter import limiter
 
 app = Flask(__name__)
 app_log, http_log, auth_log, ptz_log, privacy_log = get_loggers()
@@ -26,7 +29,29 @@ app.config["SECRET_KEY"]                     = os.environ["SECRET_KEY"]
 app.config["SQLALCHEMY_DATABASE_URI"]        = os.environ.get("DB_PATH", "sqlite:///gouda-gaze.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# ── Cookie hardening ──────────────────────────────────────
+# HttpOnly — JS cannot read the session cookie (XSS mitigation).
+# SameSite=Lax — cookie is not sent on cross-site POST requests (CSRF
+#   mitigation). Combined with state-changing endpoints now requiring POST,
+#   this blocks cross-site form/fetch CSRF without a token.
+# Secure — only transmit over HTTPS. Currently False because the app runs
+#   over plain HTTP on Tailscale.
+#   HTTPS HOOK (Phase 2/Caddy): flip both Secure flags to True once HTTPS
+#   is in place. Can also be driven by an env var:
+#   HTTPS_ENABLED=true → set True, default False.
+_https = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
+
+app.config["SESSION_COOKIE_HTTPONLY"]  = True
+app.config["SESSION_COOKIE_SAMESITE"]  = "Lax"
+app.config["SESSION_COOKIE_SECURE"]    = _https
+
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
+app.config["REMEMBER_COOKIE_SECURE"]   = _https
+app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
+
 db.init_app(app)
+limiter.init_app(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = "auth.login"
@@ -53,6 +78,25 @@ def get_client_ip() -> str:
     return request.remote_addr or "unknown"
 
 
+# ── CSRF protection ──────────────────────────────────────
+# Defense-in-depth on top of SameSite=Lax + POST-only state changes.
+# Generates a per-session token and requires it on every mutating request
+# from an authenticated user (via X-CSRF-Token header or form field).
+@app.before_request
+def _csrf_protect():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    if not current_user.is_authenticated:
+        return
+    token = (request.headers.get("X-CSRF-Token")
+             or request.form.get("csrf_token", ""))
+    if not secrets.compare_digest(token, session.get("csrf_token", "")):
+        app_log.warning(f"CSRF check failed | {get_client_ip()} | {request.path}")
+        abort(403)
+
+
 # ── HTTP access log (every request) ──────────────────────
 @app.before_request
 def _start_timer():
@@ -76,13 +120,26 @@ def _log_request(response):
     return response
 
 
-# Inject pending count into all templates so the nav badge works
+# Inject pending count + CSRF token into all templates
 @app.context_processor
 def inject_globals():
     count = 0
     if current_user.is_authenticated and current_user.is_admin:
         count = User.query.filter_by(status="pending").count()
-    return {"pending_count": count}
+    return {"pending_count": count, "csrf_token": session.get("csrf_token", "")}
+
+
+@app.errorhandler(429)
+def _rate_limit_handler(e):
+    msg = "Too many attempts — please wait and try again."
+    if request.accept_mimetypes.best == "application/json" or request.is_json:
+        return jsonify({"status": "error", "message": msg}), 429
+    # For form pages (login, register) re-render with error message inline.
+    if request.path == "/login":
+        return render_template("login.html", error=msg), 429
+    if request.path == "/register":
+        return render_template("register.html", error=msg), 429
+    return msg, 429
 
 # ── CLI: bootstrap first admin ────────────────────────────
 @app.cli.command("create-admin")
@@ -432,9 +489,8 @@ def ptz_preset(preset_id: int = 1) -> bool:
 @app.route("/")
 @login_required
 def index():
-    pi_ip = os.environ["PI_IP_TS"]
     _sync_privacy_from_camera()
-    return render_template("index.html", pi_ip=pi_ip, privacy=is_privacy_on())
+    return render_template("index.html", privacy=is_privacy_on())
 
 
 @app.route("/gallery")
@@ -452,7 +508,13 @@ def privacy_image():
 @app.route("/snapshots/<filename>")
 @login_required
 def serve_snapshot(filename: str):
+    # Reject path traversal attempts and non-JPEG files.
+    # send_from_directory is already safe against directory escape, but
+    # explicitly restricting to .jpg prevents serving unexpected file types
+    # if anything other than snapshots ended up in SNAPSHOT_DIR.
     if "/" in filename or ".." in filename:
+        abort(400)
+    if not filename.lower().endswith(".jpg"):
         abort(400)
     return send_from_directory(SNAPSHOT_DIR, filename, mimetype="image/jpeg")
 
@@ -461,6 +523,7 @@ def serve_snapshot(filename: str):
 
 @app.route("/api/snapshot", methods=["POST"])
 @login_required
+@limiter.limit("20/minute")
 def take_snapshot():
     if is_privacy_on():
         http_log.info("POST /api/snapshot blocked — privacy mode active")
@@ -575,8 +638,9 @@ def stream_settings_set():
 
 # ── PTZ API ───────────────────────────────────────────────
 
-@app.route("/api/move/start/<direction>")
+@app.route("/api/move/start/<direction>", methods=["POST"])
 @login_required
+@limiter.limit("60/minute")
 def move_start(direction: str):
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
@@ -589,8 +653,9 @@ def move_start(direction: str):
     return jsonify({"status": "success", "action": "start", "direction": direction})
 
 
-@app.route("/api/move/stop/<direction>")
+@app.route("/api/move/stop/<direction>", methods=["POST"])
 @login_required
+@limiter.limit("60/minute")
 def move_stop(direction: str):
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
@@ -603,8 +668,9 @@ def move_stop(direction: str):
     return jsonify({"status": "success", "action": "stop", "direction": direction})
 
 
-@app.route("/api/home")
+@app.route("/api/home", methods=["POST"])
 @login_required
+@limiter.limit("60/minute")
 def home_camera():
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
@@ -613,6 +679,80 @@ def home_camera():
         return jsonify({"status": "error", "message": "Home preset failed"}), 502
     ptz_log.info(f"Homed to preset 1 (by {current_user.email})")
     return jsonify({"status": "success", "action": "home"})
+
+
+
+# ── go2rtc stream proxy ───────────────────────────────────
+#
+# go2rtc is bound to 127.0.0.1:1984 (localhost only) — port 1984
+# is invisible on the network. Flask is the only path to the stream,
+# so @login_required is enforced for all signaling.
+#
+# We use go2rtc's HTTP WebRTC API (POST /api/webrtc) instead of its
+# WebSocket signaling (api/ws). The requests library cannot proxy
+# WebSocket upgrades, but the HTTP API is a plain POST:
+#   client sends SDP offer → go2rtc returns SDP answer → WebRTC starts
+#
+# The browser's WebRTC peer connection is established directly between
+# the client and the Pi after signaling; Flask is not in the media path.
+
+GO2RTC_ORIGIN = "http://127.0.0.1:1984"
+
+
+@app.route("/stream/webrtc", methods=["POST"])
+@login_required
+def stream_webrtc_signal():
+    """
+    WebRTC HTTP signaling endpoint.
+    Accepts: SDP offer (text/plain or application/sdp)
+    Returns: SDP answer (text/plain)
+    Proxies to go2rtc's POST /api/webrtc?src=<stream>
+    """
+    if is_privacy_on():
+        return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
+
+    # Whitelist the stream name — only forward to known go2rtc streams
+    src = request.args.get("src", "cam")
+    if src not in ("cam",):
+        app_log.warning(f"stream_webrtc_signal: unknown src {src!r} from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "Unknown stream"}), 400
+
+    # ── Fix 3: SDP size limit (valid SDPs are well under 8 KB; 64 KB is generous) ──
+    max_sdp = 65_536
+    content_length = request.content_length
+    if content_length and content_length > max_sdp:
+        app_log.warning(f"stream_webrtc_signal: oversized offer ({content_length}B) from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "SDP offer too large"}), 413
+
+    offer_sdp = request.get_data(as_text=True, cache=False)
+
+    if len(offer_sdp) > max_sdp:
+        app_log.warning(f"stream_webrtc_signal: oversized offer body from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "SDP offer too large"}), 413
+
+    if not offer_sdp.strip().startswith("v="):
+        app_log.warning(f"stream_webrtc_signal: invalid SDP from {get_client_ip()}")
+        return jsonify({"status": "error", "message": "Invalid SDP offer"}), 400
+
+    try:
+        resp = requests.post(
+            f"{GO2RTC_ORIGIN}/api/webrtc",
+            params={"src": src},
+            data=offer_sdp,
+            headers={"Content-Type": "application/sdp"},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        app_log.error(f"go2rtc signaling error: {e}")
+        return jsonify({"status": "error", "message": "Stream unavailable"}), 502
+
+    # go2rtc returns 201 (WHEP standard) for a successful offer/answer exchange
+    if resp.status_code not in (200, 201):
+        app_log.error(f"go2rtc returned unexpected {resp.status_code}: {resp.text[:400]!r}")
+        return jsonify({"status": "error", "message": f"go2rtc error {resp.status_code}"}), 502
+
+    app_log.debug(f"go2rtc SDP answer ({resp.status_code}):\n{resp.text}")
+    return Response(resp.text, content_type="application/sdp")
 
 
 if __name__ == "__main__":

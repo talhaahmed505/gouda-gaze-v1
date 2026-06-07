@@ -31,7 +31,6 @@ def users():
 @admin_bp.route("/users/<int:user_id>/approve", methods=["POST"])
 @admin_required
 def approve(user_id: int):
-    # CSRF HOOK: Add CSRF token validation before public internet exposure (Cloudflare/Funnel phase).
     user = db.session.get(User, user_id)
     if user is None:
         return jsonify({"status": "error", "message": "User not found"}), 404
@@ -48,7 +47,6 @@ def approve(user_id: int):
 @admin_bp.route("/users/<int:user_id>/deny", methods=["POST"])
 @admin_required
 def deny(user_id: int):
-    # CSRF HOOK: Add CSRF token validation before public internet exposure.
     user = db.session.get(User, user_id)
     if user is None:
         return jsonify({"status": "error", "message": "User not found"}), 404
@@ -65,7 +63,6 @@ def deny(user_id: int):
 @admin_bp.route("/users/<int:user_id>/revoke", methods=["POST"])
 @admin_required
 def revoke(user_id: int):
-    # CSRF HOOK: Add CSRF token validation before public internet exposure.
     user = db.session.get(User, user_id)
     if user is None:
         return jsonify({"status": "error", "message": "User not found"}), 404
@@ -82,13 +79,15 @@ def revoke(user_id: int):
 @admin_bp.route("/users/<int:user_id>/role", methods=["POST"])
 @admin_required
 def change_role(user_id: int):
-    # CSRF HOOK: Add CSRF token validation before public internet exposure.
     user = db.session.get(User, user_id)
     if user is None:
         return jsonify({"status": "error", "message": "User not found"}), 404
     if user.id == current_user.id:
         return jsonify({"status": "error", "message": "Cannot change your own role"}), 400
-    new_role = request.json.get("role", "") if request.is_json else request.form.get("role", "")
+    # Require JSON — form submission path removed to prevent CSRF form-based attacks
+    if not request.is_json:
+        return jsonify({"status": "error", "message": "Content-Type must be application/json"}), 415
+    new_role = request.json.get("role", "")
     if new_role not in ("viewer", "admin"):
         return jsonify({"status": "error", "message": f"Invalid role: {new_role}"}), 400
     old_role = user.role

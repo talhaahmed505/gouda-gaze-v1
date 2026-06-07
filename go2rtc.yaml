@@ -1,6 +1,5 @@
 api:
-  listen: ":1984"
-  origin: "*"
+  listen: "127.0.0.1:1984"
 
 streams:
   # Amcrest RTSP stream - go2rtc connects directly, no ffmpeg needed on the Pi.
