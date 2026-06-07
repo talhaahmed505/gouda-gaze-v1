@@ -5,9 +5,10 @@ from functools import wraps
 from urllib.parse import urljoin, urlparse
 
 from flask import (Blueprint, abort, redirect, render_template,
-                   request, url_for)
+                   request, session, url_for)
 from flask_login import current_user, login_required, login_user, logout_user
 
+from limiter import limiter
 from models import User, db
 
 auth_bp  = Blueprint("auth", __name__)
@@ -48,6 +49,7 @@ def admin_required(f):
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10/minute", methods=["POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
@@ -73,6 +75,8 @@ def login():
             auth_log.warning(f"LOGIN_BLOCKED_DENIED | {email} | {ip}")
             error = "Your access request was not approved."
         else:
+            # Clear session before login to prevent session fixation attacks.
+            session.clear()
             login_user(user, remember=True)
             auth_log.info(f"LOGIN_SUCCESS | {email} | {ip}")
             return redirect(_safe_next(next_url, url_for("index")))
@@ -81,6 +85,7 @@ def login():
 
 
 @auth_bp.route("/register", methods=["GET", "POST"])
+@limiter.limit("5/hour", methods=["POST"])
 def register():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
@@ -101,8 +106,9 @@ def register():
         elif len(password) < 8 or not any(c.isupper() for c in password) or not any(c.isdigit() for c in password):
             error = "Password must be at least 8 characters, include one uppercase letter, and one number."
         elif User.query.filter_by(email=email).first():
+            # Log the duplicate attempt but don't reveal the email is registered.
             auth_log.warning(f"REGISTER_DUPLICATE | {email} | {ip}")
-            error = "An account with that email already exists."
+            return redirect(url_for("auth.pending"))
         else:
             user = User(name=name, email=email, role="viewer", status="pending")
             user.set_password(password)

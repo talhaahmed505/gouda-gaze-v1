@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>GOUDA GAZE — Users</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -280,6 +281,8 @@
 
     <script>
     (() => {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
         // ── State ─────────────────────────────────────────────
         // queue: { userId(str) → { name, from, to, endpoint, payload } }
         const queue = {};
@@ -453,7 +456,7 @@
                 try {
                     const opts = {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                         body: entry.payload ? JSON.stringify(entry.payload) : '{}'
                     };
                     const resp = await fetch(entry.endpoint, opts);
