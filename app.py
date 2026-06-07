@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import secrets
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,7 +11,7 @@ import requests
 from requests.auth import HTTPDigestAuth
 from flask import (Flask, render_template, jsonify, send_file,
                    send_from_directory, request, abort, redirect, url_for,
-                   Response)
+                   Response, session)
 from flask_login import LoginManager, login_required, current_user
 
 from logger_config import get_loggers
@@ -18,6 +19,7 @@ from time import monotonic
 from models import db, User
 from auth import auth_bp, admin_required
 from admin import admin_bp
+from limiter import limiter
 
 app = Flask(__name__)
 app_log, http_log, auth_log, ptz_log, privacy_log = get_loggers()
@@ -49,6 +51,7 @@ app.config["REMEMBER_COOKIE_SECURE"]   = _https
 app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
 
 db.init_app(app)
+limiter.init_app(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = "auth.login"
@@ -75,6 +78,25 @@ def get_client_ip() -> str:
     return request.remote_addr or "unknown"
 
 
+# ── CSRF protection ──────────────────────────────────────
+# Defense-in-depth on top of SameSite=Lax + POST-only state changes.
+# Generates a per-session token and requires it on every mutating request
+# from an authenticated user (via X-CSRF-Token header or form field).
+@app.before_request
+def _csrf_protect():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    if not current_user.is_authenticated:
+        return
+    token = (request.headers.get("X-CSRF-Token")
+             or request.form.get("csrf_token", ""))
+    if not secrets.compare_digest(token, session.get("csrf_token", "")):
+        app_log.warning(f"CSRF check failed | {get_client_ip()} | {request.path}")
+        abort(403)
+
+
 # ── HTTP access log (every request) ──────────────────────
 @app.before_request
 def _start_timer():
@@ -98,13 +120,26 @@ def _log_request(response):
     return response
 
 
-# Inject pending count into all templates so the nav badge works
+# Inject pending count + CSRF token into all templates
 @app.context_processor
 def inject_globals():
     count = 0
     if current_user.is_authenticated and current_user.is_admin:
         count = User.query.filter_by(status="pending").count()
-    return {"pending_count": count}
+    return {"pending_count": count, "csrf_token": session.get("csrf_token", "")}
+
+
+@app.errorhandler(429)
+def _rate_limit_handler(e):
+    msg = "Too many attempts — please wait and try again."
+    if request.accept_mimetypes.best == "application/json" or request.is_json:
+        return jsonify({"status": "error", "message": msg}), 429
+    # For form pages (login, register) re-render with error message inline.
+    if request.path == "/login":
+        return render_template("login.html", error=msg), 429
+    if request.path == "/register":
+        return render_template("register.html", error=msg), 429
+    return msg, 429
 
 # ── CLI: bootstrap first admin ────────────────────────────
 @app.cli.command("create-admin")
@@ -488,6 +523,7 @@ def serve_snapshot(filename: str):
 
 @app.route("/api/snapshot", methods=["POST"])
 @login_required
+@limiter.limit("20/minute")
 def take_snapshot():
     if is_privacy_on():
         http_log.info("POST /api/snapshot blocked — privacy mode active")
@@ -604,6 +640,7 @@ def stream_settings_set():
 
 @app.route("/api/move/start/<direction>", methods=["POST"])
 @login_required
+@limiter.limit("60/minute")
 def move_start(direction: str):
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
@@ -618,6 +655,7 @@ def move_start(direction: str):
 
 @app.route("/api/move/stop/<direction>", methods=["POST"])
 @login_required
+@limiter.limit("60/minute")
 def move_stop(direction: str):
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403
@@ -632,6 +670,7 @@ def move_stop(direction: str):
 
 @app.route("/api/home", methods=["POST"])
 @login_required
+@limiter.limit("60/minute")
 def home_camera():
     if is_privacy_on():
         return jsonify({"status": "error", "message": "Privacy mode is active"}), 403

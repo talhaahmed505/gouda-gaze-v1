@@ -21,6 +21,7 @@
 
             <form class="auth-form" method="POST" action="/login">
                 <input type="hidden" name="next" value="{{ next }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
                 <div class="auth-field">
                     <label class="auth-label" for="email">Email</label>

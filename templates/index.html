@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>GOUDA GAZE</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -178,6 +179,8 @@
     </div>
 
     <script>
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
         // ── WebRTC stream ─────────────────────────────────────
         (function startStream() {
             const video = document.getElementById('cam-feed');
@@ -220,7 +223,7 @@
                 }))
                 .then(() => fetch('/stream/webrtc?src=cam', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/sdp' },
+                    headers: { 'Content-Type': 'application/sdp', 'X-CSRF-Token': csrfToken },
                     body: pc.localDescription.sdp,
                 }))
                 .then(r => {
@@ -249,8 +252,8 @@
         }
 
         // ── PTZ ──────────────────────────────────────────────
-        function startMove(dir) { fetch('/api/move/start/' + dir, { method: 'POST' }).catch(console.error); }
-        function stopMove(dir)  { fetch('/api/move/stop/'  + dir, { method: 'POST' }).catch(console.error); }
+        function startMove(dir) { fetch('/api/move/start/' + dir, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } }).catch(console.error); }
+        function stopMove(dir)  { fetch('/api/move/stop/'  + dir, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } }).catch(console.error); }
 
         document.querySelectorAll('.control-btn[data-dir]:not([disabled])').forEach(btn => {
             const dir = btn.dataset.dir;
@@ -268,7 +271,7 @@
                 slider.value = 100;
                 feed.style.transform = 'scale(1)';
                 zoomLabel.textContent = '1.0x';
-                fetch('/api/home', { method: 'POST' }).catch(console.error);
+                fetch('/api/home', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } }).catch(console.error);
             });
         }
 
@@ -294,7 +297,7 @@
                 snapshotBtn.disabled      = true;
                 snapshotLabel.textContent = 'Capturing…';
 
-                fetch('/api/snapshot', { method: 'POST' })
+                fetch('/api/snapshot', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } })
                     .then(r => r.json())
                     .then(data => {
                         if (data.status === 'success') {
@@ -318,7 +321,7 @@
         document.getElementById('privacy-btn').addEventListener('click', () => {
             const isOn     = document.body.classList.contains('privacy-active');
             const endpoint = isOn ? '/api/privacy/off' : '/api/privacy/on';
-            fetch(endpoint, { method: 'POST' })
+            fetch(endpoint, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } })
                 .then(r => r.json())
                 .then(() => window.location.reload())
                 .catch(err => console.error("Privacy error:", err));
@@ -439,7 +442,7 @@
 
             fetch('/api/stream/settings', {
                 method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                 body:    JSON.stringify({ resolution, fps, bitrate, bitrate_ctrl: bitrateCtrl })
             })
             .then(r => r.json())
